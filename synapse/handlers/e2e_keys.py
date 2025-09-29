@@ -23,9 +23,9 @@ import logging
 from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import attr
-from canonicaljson import encode_canonical_json
-from signedjson.key import VerifyKey, decode_verify_key_bytes
-from signedjson.sign import SignatureVerifyException, verify_signed_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
+from synapse.util.signedjson_compat import VerifyKey, decode_verify_key_bytes
+from synapse.util.signedjson_compat import SignatureVerifyException, verify_signed_json
 from unpaddedbase64 import decode_base64
 
 from twisted.internet import defer

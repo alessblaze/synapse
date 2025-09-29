@@ -16,7 +16,7 @@ from typing import Optional
 from unittest import mock
 
 import signedjson
-from signedjson.key import encode_verify_key_base64, get_verify_key
+from synapse.util.signedjson_compat import encode_verify_key_base64, get_verify_key
 
 from twisted.internet.testing import MemoryReactor
 

@@ -20,7 +20,7 @@
 #
 from typing import List, Optional, cast
 
-from canonicaljson import json
+from synapse.util.canonicaljson_compat import json
 
 from twisted.internet.testing import MemoryReactor
 

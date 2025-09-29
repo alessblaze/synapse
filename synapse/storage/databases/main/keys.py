@@ -24,8 +24,8 @@ import json
 import logging
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple, Union, cast
 
-from canonicaljson import encode_canonical_json
-from signedjson.key import decode_verify_key_bytes
+from synapse.util.canonicaljson_compat import encode_canonical_json
+from synapse.util.signedjson_compat import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
 from synapse.storage.database import LoggingTransaction

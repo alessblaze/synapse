@@ -26,7 +26,7 @@ import urllib.parse
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 
 from twisted.internet.testing import MemoryReactor
 

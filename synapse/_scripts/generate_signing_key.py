@@ -23,7 +23,7 @@ import argparse
 import os
 import sys
 
-from signedjson.key import generate_signing_key, write_signing_keys
+from synapse.util.signedjson_compat import generate_signing_key, write_signing_keys
 
 from synapse.util.stringutils import random_string
 

@@ -23,7 +23,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Dict, Mapping, Optional, Set, Tuple
 
-from signedjson.sign import sign_json
+from synapse.util.signedjson_compat import sign_json
 
 from twisted.web.server import Request
 

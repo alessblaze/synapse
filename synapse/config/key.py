@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
 
 import attr
 import jsonschema
-from signedjson.key import (
+from synapse.util.signedjson_compat import (
     NACL_ED25519,
     SigningKey,
     VerifyKey,
@@ -46,7 +46,7 @@ from synapse.util.stringutils import random_string, random_string_with_symbols
 from ._base import Config, ConfigError, read_file
 
 if TYPE_CHECKING:
-    from signedjson.key import VerifyKeyWithExpiry
+    from synapse.util.signedjson_compat import VerifyKeyWithExpiry
 
 INSECURE_NOTARY_ERROR = """\
 Your server is configured to accept key server responses without signature

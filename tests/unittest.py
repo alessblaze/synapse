@@ -48,8 +48,8 @@ from typing import (
 )
 from unittest.mock import Mock, patch
 
-import canonicaljson
-import signedjson.key
+from synapse.util import canonicaljson_compat as canonicaljson
+from synapse.util import signedjson_compat as signedjson
 import unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 

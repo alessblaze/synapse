@@ -24,7 +24,7 @@ import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 
 from twisted.internet.interfaces import IDelayedCall
 

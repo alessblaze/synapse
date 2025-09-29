@@ -67,7 +67,7 @@ except ImportError:
 
 # Teach canonicaljson how to serialise immutabledicts.
 try:
-    from canonicaljson import register_preserialisation_callback
+    from synapse.util.canonicaljson_compat import register_preserialisation_callback
     from immutabledict import immutabledict
 
     def _immutabledict_cb(d: immutabledict) -> Dict[str, Any]:

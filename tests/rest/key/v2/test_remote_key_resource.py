@@ -22,10 +22,10 @@ from io import BytesIO, StringIO
 from typing import Any, Dict, Optional, Union
 from unittest.mock import Mock
 
-import signedjson.key
-from canonicaljson import encode_canonical_json
-from signedjson.sign import sign_json
-from signedjson.types import SigningKey
+from synapse.util import signedjson_compat as signedjson
+from synapse.util.canonicaljson_compat import encode_canonical_json
+from synapse.util.signedjson_compat import sign_json
+from synapse.util.signedjson_compat import SigningKey
 
 from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import NoResource, Resource

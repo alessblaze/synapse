@@ -21,7 +21,7 @@
 import json
 from typing import TYPE_CHECKING, Dict, Optional, Tuple, cast
 
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, StoreError

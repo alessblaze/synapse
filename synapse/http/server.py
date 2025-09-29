@@ -47,7 +47,7 @@ from typing import (
 
 import attr
 import jinja2
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 from zope.interface import implementer
 
 from twisted.internet import defer, interfaces, reactor

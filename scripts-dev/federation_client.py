@@ -47,8 +47,8 @@ from typing import Any, Dict, Mapping, Optional, Tuple, Union
 from urllib import parse as urlparse
 
 import requests
-import signedjson.key
-import signedjson.types
+from synapse.util import signedjson_compat as signedjson
+from synapse.util import signedjson_compat as signedjson
 import srvlookup
 import yaml
 from requests import PreparedRequest, Response

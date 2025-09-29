@@ -25,9 +25,9 @@ import hashlib
 import logging
 from typing import Any, Callable, Dict, Tuple
 
-from canonicaljson import encode_canonical_json
-from signedjson.sign import sign_json
-from signedjson.types import SigningKey
+from synapse.util.canonicaljson_compat import encode_canonical_json
+from synapse.util.signedjson_compat import sign_json
+from synapse.util.signedjson_compat import SigningKey
 from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.api.errors import Codes, SynapseError

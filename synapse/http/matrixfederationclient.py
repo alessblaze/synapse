@@ -46,9 +46,9 @@ from typing import (
 
 import attr
 import treq
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 from prometheus_client import Counter
-from signedjson.sign import sign_json
+from synapse.util.signedjson_compat import sign_json
 
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError

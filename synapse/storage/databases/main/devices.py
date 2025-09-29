@@ -34,7 +34,7 @@ from typing import (
     cast,
 )
 
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 
 from synapse.api.constants import EduTypes
 from synapse.api.errors import Codes, StoreError

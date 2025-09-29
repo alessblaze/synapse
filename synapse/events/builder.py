@@ -22,7 +22,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import attr
-from signedjson.types import SigningKey
+from synapse.util.signedjson_compat import SigningKey
 
 from synapse.api.constants import MAX_DEPTH, EventTypes
 from synapse.api.room_versions import (

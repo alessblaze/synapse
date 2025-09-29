@@ -24,7 +24,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Iterable, List, Mapping, Optional, Tuple, cast
 
 import attr
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 
 from synapse.api.constants import Direction
 from synapse.metrics.background_process_metrics import wrap_as_background_process

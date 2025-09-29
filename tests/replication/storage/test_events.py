@@ -21,7 +21,7 @@
 import logging
 from typing import Any, Iterable, List, Optional, Tuple
 
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor

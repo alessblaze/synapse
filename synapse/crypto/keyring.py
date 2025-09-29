@@ -24,14 +24,14 @@ import logging
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
 
 import attr
-from signedjson.key import (
+from synapse.util.signedjson_compat import (
     decode_verify_key_bytes,
     encode_verify_key_base64,
     get_verify_key,
     is_signing_algorithm_supported,
 )
-from signedjson.sign import SignatureVerifyException, signature_ids, verify_signed_json
-from signedjson.types import VerifyKey
+from synapse.util.signedjson_compat import SignatureVerifyException, signature_ids, verify_signed_json
+from synapse.util.signedjson_compat import VerifyKey
 from unpaddedbase64 import decode_base64
 
 from twisted.internet import defer

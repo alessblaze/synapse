@@ -24,8 +24,8 @@ import sys
 import time
 from typing import NoReturn, Optional
 
-from signedjson.key import encode_verify_key_base64, get_verify_key, read_signing_keys
-from signedjson.types import VerifyKey
+from synapse.util.signedjson_compat import encode_verify_key_base64, get_verify_key, read_signing_keys
+from synapse.util.signedjson_compat import VerifyKey
 
 
 def exit(status: int = 0, message: Optional[str] = None) -> NoReturn:

@@ -23,7 +23,7 @@ from typing import Optional, cast
 from unittest.mock import Mock, call
 
 from parameterized import parameterized
-from signedjson.key import (
+from synapse.util.signedjson_compat import (
     encode_verify_key_base64,
     generate_signing_key,
     get_verify_key,

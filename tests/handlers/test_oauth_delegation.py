@@ -30,12 +30,12 @@ from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
 from parameterized.parameterized import parameterized_class
-from signedjson.key import (
+from synapse.util.signedjson_compat import (
     encode_verify_key_base64,
     generate_signing_key,
     get_verify_key,
 )
-from signedjson.sign import sign_json
+from synapse.util.signedjson_compat import sign_json
 
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor

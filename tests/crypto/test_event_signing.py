@@ -19,8 +19,8 @@
 #
 #
 
-from signedjson.key import decode_signing_key_base64
-from signedjson.types import SigningKey
+from synapse.util.signedjson_compat import decode_signing_key_base64
+from synapse.util.signedjson_compat import SigningKey
 
 from synapse.api.room_versions import RoomVersions
 from synapse.crypto.event_signing import add_hashes_and_signatures

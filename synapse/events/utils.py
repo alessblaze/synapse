@@ -37,7 +37,7 @@ from typing import (
 )
 
 import attr
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 
 from synapse.api.constants import (
     CANONICALJSON_MAX_INT,

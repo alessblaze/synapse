@@ -22,7 +22,7 @@ import logging
 from unittest.mock import AsyncMock, Mock
 
 from netaddr import IPSet
-from signedjson.key import (
+from synapse.util.signedjson_compat import (
     encode_verify_key_base64,
     generate_signing_key,
     get_verify_key,

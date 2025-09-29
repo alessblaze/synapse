@@ -23,11 +23,11 @@ from typing import Any, Dict, List, Optional, cast
 from unittest.mock import Mock
 
 import attr
-import canonicaljson
-import signedjson.key
-import signedjson.sign
-from signedjson.key import encode_verify_key_base64, get_verify_key
-from signedjson.types import SigningKey, VerifyKey
+from synapse.util import canonicaljson_compat as canonicaljson
+from synapse.util import signedjson_compat as signedjson
+from synapse.util import signedjson_compat as signedjson
+from synapse.util.signedjson_compat import encode_verify_key_base64, get_verify_key
+from synapse.util.signedjson_compat import SigningKey, VerifyKey
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred, ensureDeferred

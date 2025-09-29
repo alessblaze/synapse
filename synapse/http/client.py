@@ -38,7 +38,7 @@ from typing import (
 
 import attr
 import treq
-from canonicaljson import encode_canonical_json
+from synapse.util.canonicaljson_compat import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
 from prometheus_client import Counter
 from zope.interface import implementer

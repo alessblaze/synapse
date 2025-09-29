@@ -22,12 +22,12 @@ import urllib.parse
 from http import HTTPStatus
 from unittest.mock import patch
 
-from signedjson.key import (
+from synapse.util.signedjson_compat import (
     encode_verify_key_base64,
     generate_signing_key,
     get_verify_key,
 )
-from signedjson.sign import sign_json
+from synapse.util.signedjson_compat import sign_json
 
 from synapse.api.errors import Codes
 from synapse.rest import admin

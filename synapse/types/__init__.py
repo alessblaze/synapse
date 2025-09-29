@@ -48,8 +48,8 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
-from signedjson.key import decode_verify_key_bytes
-from signedjson.types import VerifyKey
+from synapse.util.signedjson_compat import decode_verify_key_bytes
+from synapse.util.signedjson_compat import VerifyKey
 from typing_extensions import Self
 from unpaddedbase64 import decode_base64
 from zope.interface import Interface

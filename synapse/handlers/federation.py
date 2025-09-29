@@ -41,8 +41,8 @@ from typing import (
 
 import attr
 from prometheus_client import Histogram
-from signedjson.key import decode_verify_key_bytes
-from signedjson.sign import verify_signed_json
+from synapse.util.signedjson_compat import decode_verify_key_bytes
+from synapse.util.signedjson_compat import verify_signed_json
 from unpaddedbase64 import decode_base64
 
 from synapse import event_auth

@@ -22,7 +22,7 @@
 import logging
 
 import attr
-from signedjson.types import VerifyKey
+from synapse.util.signedjson_compat import VerifyKey
 
 logger = logging.getLogger(__name__)
 

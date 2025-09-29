@@ -25,8 +25,8 @@ import sys
 from json import JSONDecodeError
 
 import yaml
-from signedjson.key import read_signing_keys
-from signedjson.sign import sign_json
+from synapse.util.signedjson_compat import read_signing_keys
+from synapse.util.signedjson_compat import sign_json
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.crypto.event_signing import add_hashes_and_signatures
