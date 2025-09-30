@@ -51,7 +51,7 @@ from immutabledict import immutabledict
 from synapse.util.signedjson_compat import decode_verify_key_bytes
 from synapse.util.signedjson_compat import VerifyKey
 from typing_extensions import Self
-from unpaddedbase64 import decode_base64
+from synapse.util.base64_compat import decode_base64
 from zope.interface import Interface
 
 from twisted.internet.defer import CancelledError

@@ -20,7 +20,7 @@
 #
 
 import abc
-import base64
+from synapse.util import base64_compat as base64
 import logging
 from typing import Optional, Union
 

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 import attr
 import msgpack
-from unpaddedbase64 import decode_base64, encode_base64
+from synapse.util.base64_compat import decode_base64, encode_base64
 
 from synapse.api.constants import (
     EventContentFields,

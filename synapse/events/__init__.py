@@ -39,7 +39,7 @@ from typing import (
 )
 
 import attr
-from unpaddedbase64 import encode_base64
+from synapse.util.base64_compat import encode_base64
 
 from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions

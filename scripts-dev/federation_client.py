@@ -40,7 +40,7 @@ Some tips on doing the join dance with this:
 """
 
 import argparse
-import base64
+from synapse.util import base64_compat as base64
 import json
 import sys
 from typing import Any, Dict, Mapping, Optional, Tuple, Union

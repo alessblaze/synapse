@@ -21,7 +21,7 @@
 
 import hashlib
 
-import unpaddedbase64
+from synapse.util import base64_compat as unpaddedbase64
 
 
 def sha256_and_url_safe_base64(input_text: str) -> str:

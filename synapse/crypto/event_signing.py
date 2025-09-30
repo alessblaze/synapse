@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, Tuple
 from synapse.util.canonicaljson_compat import encode_canonical_json
 from synapse.util.signedjson_compat import sign_json
 from synapse.util.signedjson_compat import SigningKey
-from unpaddedbase64 import decode_base64, encode_base64
+from synapse.util.base64_compat import decode_base64, encode_base64
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion

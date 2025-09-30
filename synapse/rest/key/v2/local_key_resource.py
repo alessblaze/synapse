@@ -24,7 +24,7 @@ import re
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from synapse.util.signedjson_compat import sign_json
-from unpaddedbase64 import encode_base64
+from synapse.util.base64_compat import encode_base64
 
 from twisted.web.server import Request
 

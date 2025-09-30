@@ -50,7 +50,7 @@ from unittest.mock import Mock, patch
 
 from synapse.util import canonicaljson_compat as canonicaljson
 from synapse.util import signedjson_compat as signedjson
-import unpaddedbase64
+from synapse.util import base64_compat as unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet.defer import Deferred, ensureDeferred

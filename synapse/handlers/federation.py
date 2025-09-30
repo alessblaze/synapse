@@ -43,7 +43,7 @@ import attr
 from prometheus_client import Histogram
 from synapse.util.signedjson_compat import decode_verify_key_bytes
 from synapse.util.signedjson_compat import verify_signed_json
-from unpaddedbase64 import decode_base64
+from synapse.util.base64_compat import decode_base64
 
 from synapse import event_auth
 from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership

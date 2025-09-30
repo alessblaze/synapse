@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import base64
+from synapse.util import base64_compat as base64
 import json
 import os
 import re

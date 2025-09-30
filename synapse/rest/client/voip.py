@@ -19,7 +19,7 @@
 #
 #
 
-import base64
+from synapse.util import base64_compat as base64
 import hashlib
 import hmac
 from typing import TYPE_CHECKING, Tuple

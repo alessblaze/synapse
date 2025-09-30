@@ -38,7 +38,7 @@ from synapse.util.signedjson_compat import (
     read_signing_keys,
     write_signing_keys,
 )
-from unpaddedbase64 import decode_base64
+from synapse.util.base64_compat import decode_base64
 
 from synapse.types import JsonDict
 from synapse.util.stringutils import random_string, random_string_with_symbols

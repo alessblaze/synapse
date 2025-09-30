@@ -44,7 +44,7 @@ from typing import (
 
 import attr
 import bcrypt
-import unpaddedbase64
+from synapse.util import base64_compat as unpaddedbase64
 from prometheus_client import Counter
 
 from twisted.internet.defer import CancelledError

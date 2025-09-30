@@ -18,7 +18,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.util.signedjson_compat import decode_verify_key_bytes
-from unpaddedbase64 import decode_base64
+from synapse.util.base64_compat import decode_base64
 
 from synapse.api.errors import SynapseError
 from synapse.crypto.keyring import VerifyJsonRequest

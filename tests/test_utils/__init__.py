@@ -23,7 +23,7 @@
 Utilities for running the unit tests
 """
 
-import base64
+from synapse.util import base64_compat as base64
 import json
 import sys
 import warnings

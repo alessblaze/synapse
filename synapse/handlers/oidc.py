@@ -38,7 +38,7 @@ from typing import (
 from urllib.parse import urlencode, urlparse
 
 import attr
-import unpaddedbase64
+from synapse.util import base64_compat as unpaddedbase64
 from authlib.common.security import generate_token
 from authlib.jose import JsonWebToken, JWTClaims
 from authlib.jose.errors import InvalidClaimError, JoseError, MissingClaimError

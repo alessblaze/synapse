@@ -20,7 +20,7 @@
 #
 
 
-import base64
+from synapse.util import base64_compat as base64
 import json
 from hashlib import sha256
 from typing import Any, ContextManager, Dict, List, Optional, Tuple

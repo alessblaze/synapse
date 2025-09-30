@@ -32,7 +32,7 @@ from synapse.util.signedjson_compat import (
 )
 from synapse.util.signedjson_compat import SignatureVerifyException, signature_ids, verify_signed_json
 from synapse.util.signedjson_compat import VerifyKey
-from unpaddedbase64 import decode_base64
+from synapse.util.base64_compat import decode_base64
 
 from twisted.internet import defer
 
