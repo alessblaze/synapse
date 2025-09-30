@@ -111,8 +111,8 @@ class CacheNode:
                 if USE_GLOBAL_LIST and clock:
                     self._global_list_node = _TimedListNode.insert_after(self, GLOBAL_ROOT)
                     self._global_list_node.update_last_access(clock)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to add cache node to global time-based eviction list: {e}")
     
     def drop_from_cache(self):
         # Remove from cache and ensure it's actually gone
@@ -122,8 +122,8 @@ class CacheNode:
         if self._global_list_node:
             try:
                 self._global_list_node.remove_from_list()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to remove cache node from global eviction list: {e}")
         
         return result is not None
     
@@ -134,8 +134,8 @@ class CacheNode:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT
                 self._global_list_node.move_after(GLOBAL_ROOT)
                 self._global_list_node.update_last_access(clock)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to update cache node last access time: {e}")
 
 class CacheWrapper(dict):
     def __init__(self, rust_cache, clock=None, prune_unread_entries=True):
@@ -155,24 +155,32 @@ class CacheWrapper(dict):
                 pass
     
     def __getitem__(self, key):
-        if key not in self._rust_cache:
+        try:
+            # Atomic check and access to avoid race condition
+            value = self._rust_cache[key]
+            
+            # Create or get existing CacheNode - avoid dict lookup if possible
+            node = self._nodes.get(key)
+            if node is None:
+                node = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
+                self._nodes[key] = node
+            
+            # Update last access time
+            if self._clock:
+                node.update_last_access(self._clock)
+            
+            return node
+        except KeyError:
             raise KeyError(key)
-        
-        # Create or get existing CacheNode
-        if key not in self._nodes:
-            self._nodes[key] = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
-        
-        node = self._nodes[key]
-        # Update last access time
-        if self._clock:
-            node.update_last_access(self._clock)
-        
-        return node
     
     def __setitem__(self, key, value):
-        # When a new item is added, create a node for it
-        if self._prune_unread_entries and self._clock and key not in self._nodes:
-            self._nodes[key] = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
+        # Store value in underlying cache first
+        self._rust_cache[key] = value
+        
+        # Create node for time-based eviction tracking - avoid double lookup
+        if self._prune_unread_entries and self._clock:
+            if key not in self._nodes:
+                self._nodes[key] = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
     
     def __contains__(self, key):
         return key in self._rust_cache
@@ -309,10 +317,12 @@ class LruCache(Generic[KT, VT]):
         if LRU_INFO:
             log_info(f"🔍 LruCache.get({self.cache_name}): {key}")
         try:
-            result = self._rust_cache.get(key, default=default, callbacks=list(callbacks) if callbacks else None)
+            # Avoid list() conversion in hot path - pass callbacks directly if it's already a list
+            cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
+            result = self._rust_cache.get(key, default=default, callbacks=cb_list)
             
             # Update access time for time-based eviction if it's a hit
-            if result != default and update_last_access and not self._tree and hasattr(self.cache, '__getitem__'):
+            if result != default and update_last_access and not self._tree:
                 try:
                     # This will update the last access time
                     _ = self.cache[key]
@@ -338,10 +348,12 @@ class LruCache(Generic[KT, VT]):
                 mapped_keys = self._extra_index.setdefault(index_key, set())
                 mapped_keys.add(key)
             
-            self._rust_cache.set(key, value, list(callbacks) if callbacks else [])
+            # Avoid list() conversion in hot path
+            cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else [])
+            self._rust_cache.set(key, value, cb_list)
             
             # Notify cache wrapper of new entry for time-based eviction
-            if not self._tree and hasattr(self.cache, '__setitem__'):
+            if not self._tree:
                 self.cache[key] = value
             
             if LRU_INFO:
@@ -378,8 +390,8 @@ class LruCache(Generic[KT, VT]):
                             mapped_keys.discard(key)
                             if not mapped_keys:
                                 self._extra_index.pop(index_key, None)
-                except Exception:
-                    pass  # Ignore errors in cleanup
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup extra index for key {key}: {e}")
             
             result = self._rust_cache.pop(key, default)
             log_info(f"LruCache.pop({self.cache_name}): {'✅ FOUND' if result != default else '❌ NOT_FOUND'}")
@@ -438,7 +450,7 @@ class LruCache(Generic[KT, VT]):
             try:
                 self._rust_cache.invalidate(key)
             except Exception as e:
-                log_debug(f"❌ Failed to invalidate key {key}: {e}")
+                logger.warning(f"Failed to invalidate key {key}: {e}")
     
     def clear(self) -> None:
         try:
@@ -487,8 +499,8 @@ class LruCache(Generic[KT, VT]):
     def __del__(self) -> None:
         try:
             self.clear()
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to clear cache during destruction: {e}")
 
 ## Must be wondering why? it would help for workers management in future. Event workers if they consists in same base it would be easier to manage.
 ## Also with multithreading sync caches would be blocking, async caches would be non-blocking simultaneous queues via twisted.
@@ -505,21 +517,24 @@ class AsyncLruCache(Generic[KT, VT]):
         if 'cache_name' in kwargs and kwargs['cache_name']:
             kwargs['cache_name'] = f"{kwargs['cache_name']}_async"
         
+        # Store original max_size before applying cache factor
+        original_max_size = kwargs.get('max_size', 1000)
+        
         # Apply cache factor like sync version
-        max_size = kwargs.get('max_size', 1000)
+        max_size = original_max_size
         if kwargs.get('apply_cache_factor_from_config', True):
             try:
                 from synapse.config import cache as cache_config
-                max_size = int(max_size * cache_config.properties.default_factor_size)
-            except:
-                pass
+                max_size = int(original_max_size * cache_config.properties.default_factor_size)
+            except Exception as e:
+                logger.warning(f"Failed to apply cache factor from config: {e}")
         kwargs['max_size'] = max_size
         
         # Store properties for compatibility first
         self.max_size = max_size
         self.cache_name = kwargs.get('cache_name')  # This is the modified name with _async suffix
         self.apply_cache_factor_from_config = kwargs.get('apply_cache_factor_from_config', True)
-        self._original_max_size = kwargs.get('max_size', 1000)
+        self._original_max_size = original_max_size
         self.metrics = kwargs.get('metrics')
         
         # Store parameters for timed eviction patterns
@@ -549,7 +564,8 @@ class AsyncLruCache(Generic[KT, VT]):
                 self._async_rust_cache = AsyncRustLruCache(max_size, f"{self.cache_name}_async", self.metrics)
                 self._global_loop = current_loop
                 self._is_async = True
-            except Exception:
+            except Exception as e:
+                logger.error(f"Failed to create async event loop: {e}")
                 raise RuntimeError("No asyncio event loop available")
         
         # Create cache wrapper for global integration like sync version
@@ -604,7 +620,7 @@ class AsyncLruCache(Generic[KT, VT]):
     async def get(self, key: KT, default: Optional[T] = None, update_metrics: bool = True) -> Optional[VT]:
         result = self._sync_rust_cache.get(key, default)
         # Update access time for global cleanup like sync version
-        if result != default and not self._tree and hasattr(self.cache, '__getitem__'):
+        if result != default and not self._tree:
             try:
                 _ = self.cache[key]  # This updates last access time
             except KeyError:
@@ -617,7 +633,8 @@ class AsyncLruCache(Generic[KT, VT]):
                 rust_result = self._async_rust_cache.get(key, SENTINEL)
                 result = await self._await_rust_result(rust_result)
                 return result if result is not SENTINEL else None
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to get external cache value for key {key}: {e}")
                 return None
         return None
     
@@ -634,13 +651,13 @@ class AsyncLruCache(Generic[KT, VT]):
             try:
                 rust_result = self._async_rust_cache.set(key, value, [])
                 await self._await_rust_result(rust_result)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to set external cache value for key {key}: {e}")
     
     def set_local(self, key: KT, value: VT) -> None:
         self._sync_rust_cache.set(key, value, [])
         # Notify cache wrapper for global integration
-        if not self._tree and hasattr(self.cache, '__setitem__'):
+        if not self._tree:
             self.cache[key] = value
     
     def invalidate_local(self, key: KT) -> None:
@@ -653,15 +670,28 @@ class AsyncLruCache(Generic[KT, VT]):
     
     def clear(self) -> None:
         self._sync_rust_cache.clear()
+        # Clear async cache if available
+        if hasattr(self, '_async_rust_cache') and self._async_rust_cache:
+            try:
+                self._async_rust_cache.clear()
+            except Exception as e:
+                logger.warning(f"Failed to clear async rust cache: {e}")
        
     async def invalidate(self, key: KT) -> None:
         # This method should invalidate any external cache and then invalidate the LruCache.
         return self._sync_rust_cache.invalidate(key)
     async def _await_rust_result(self, rust_result):
         """Helper to convert asyncio.Future to Twisted Deferred"""
-        future = asyncio.ensure_future(rust_result)
-        deferred = defer.Deferred.fromFuture(future)
-        return await deferred    
+        future = None
+        try:
+            future = asyncio.ensure_future(rust_result)
+            deferred = defer.Deferred.fromFuture(future)
+            return await deferred
+        except Exception as e:
+            # Cancel future on error to prevent resource leak
+            if future and not future.done():
+                future.cancel()
+            raise    
     def invalidate_on_extra_index_local(self, index_key: KT) -> None:
         if not self._extra_index_cb:
             return
@@ -673,122 +703,39 @@ class AsyncLruCache(Generic[KT, VT]):
     async def contains(self, key: KT) -> bool:
         return key in self._sync_rust_cache
     
-
-class DebugAsyncLruCache(AsyncLruCache[KT, VT]):
-    """Debug async wrapper with race condition logging"""
-    
-    def __init__(self, *args: Any, **kwargs: Any):
-        # Create independent cache with debug suffix (before base class modifies it)
-        original_cache_name = kwargs.get('cache_name')
-        if original_cache_name:
-            kwargs['cache_name'] = f"{original_cache_name}_debug"
-        super().__init__(*args, **kwargs)
-        
-        self._operation_count = 0
-        self._lock = threading.Lock()
-        log_async_info(f"DebugAsyncLruCache({self.cache_name}) with race detection ready")
-        # Force a test operation to verify logging works
-        if LRU_ASYNC_DEBUG:
-            log_async_info(f"🧪 Testing DebugAsyncLruCache logging for {self.cache_name}")
-    
-    def _log_operation(self, op: str, key=None):
-        if not LRU_ASYNC_DEBUG:
+    def set_cache_factor(self, factor: float) -> None:
+        if not getattr(self, 'apply_cache_factor_from_config', True):
             return
-            
-        with self._lock:
-            self._operation_count += 1
-            count = self._operation_count
-        
-        thread_info = f"thread={threading.current_thread().ident}"
-        try:
-            task_info = f"task={id(asyncio.current_task()) if asyncio.current_task() else 'None'}"
-        except RuntimeError:
-            task_info = "task=NoLoop"
-        key_info = f"key={key}" if key is not None else ""
-        
-        log_async_info(f"🔧 [{count:04d}] {op} {key_info} {thread_info} {task_info}")
-    
-    async def get(self, key: KT, default: Optional[T] = None, update_metrics: bool = True) -> Optional[VT]:
-        self._log_operation("GET_START", key)
-        try:
-            result = await super().get(key, default, update_metrics)
-            hit_miss = "✅ HIT" if result != default else "❌ MISS"
-            self._log_operation(f"GET_END {hit_miss}", key)
-            return result
-        except Exception as e:
-            self._log_operation(f"GET_ERROR: {e}", key)
-            raise
-    
-    async def get_external(self, key: KT, default: Optional[T] = None, update_metrics: bool = True) -> Optional[VT]:
-        self._log_operation("GET_EXT_START", key)
-        result = await super().get_external(key, default, update_metrics)
-        hit_miss = "✅ HIT" if result is not None else "❌ MISS"
-        self._log_operation(f"GET_EXT_END {hit_miss}", key)
-        return result
-    
-    def get_local(self, key: KT, default: Optional[T] = None, update_metrics: bool = True) -> Optional[VT]:
-        self._log_operation("GET_LOCAL_START", key)
-        result = super().get_local(key, default, update_metrics)
-        hit_miss = "✅ HIT" if result != default else "❌ MISS"
-        self._log_operation(f"GET_LOCAL_END {hit_miss}", key)
-        return result
-    
-    async def set(self, key: KT, value: VT) -> None:
-        self._log_operation("SET_START", key)
-        try:
-            await super().set(key, value)
-            self._log_operation("SET_END ✅ SUCCESS", key)
-        except Exception as e:
-            self._log_operation(f"SET_ERROR ❌: {e}", key)
-            raise
-    
-    def set_local(self, key: KT, value: VT) -> None:
-        self._log_operation("SET_LOCAL_START", key)
-        try:
-            super().set_local(key, value)
-            self._log_operation("SET_LOCAL_END ✅ SUCCESS", key)
-        except Exception as e:
-            self._log_operation(f"SET_LOCAL_ERROR ❌: {e}", key)
-            raise
-    
-    async def invalidate(self, key: KT) -> None:
-        self._log_operation("INVALIDATE_START", key)
-        try:
-            await super().invalidate(key)
-            self._log_operation("INVALIDATE_END ✅ SUCCESS", key)
-        except Exception as e:
-            self._log_operation(f"INVALIDATE_ERROR ❌: {e}", key)
-            raise
-    
-    def invalidate_local(self, key: KT) -> None:
-        self._log_operation("INVALIDATE_LOCAL_START", key)
-        try:
-            super().invalidate_local(key)
-            self._log_operation("INVALIDATE_LOCAL_END ✅ SUCCESS", key)
-        except Exception as e:
-            self._log_operation(f"INVALIDATE_LOCAL_ERROR ❌: {e}", key)
-            raise
-    
-    def invalidate_on_extra_index_local(self, index_key: KT) -> None:
-        self._log_operation("INVALIDATE_IDX", index_key)
-        return super().invalidate_on_extra_index_local(index_key)
-    
-    async def contains(self, key: KT) -> bool:
-        self._log_operation("CONTAINS_START", key)
-        try:
-            result = await super().contains(key)
-            found_status = "✅ FOUND" if result else "❌ NOT_FOUND"
-            self._log_operation(f"CONTAINS_END {found_status}", key)
-            return result
-        except Exception as e:
-            self._log_operation(f"CONTAINS_ERROR ❌: {e}", key)
-            raise
+        new_size = int(getattr(self, '_original_max_size', self.max_size) * factor)
+        if new_size != self.max_size:
+            self.max_size = new_size
+            try:
+                self._sync_rust_cache.resize(new_size)
+                if self._async_rust_cache:
+                    self._async_rust_cache.resize(new_size)
+                log_async_info(f"🔄 AsyncCache {self.cache_name} resized to {new_size}")
+            except Exception as e:
+                log_error(f"❌ Failed to resize async cache {self.cache_name}: {e}")
     
     def get_cache_type(self) -> str:
-        """Returns cache type with debug suffix."""
-        base_type = super().get_cache_type()
-        return f"{base_type}_DEBUG"
+        return "ASYNC_RUST"
     
-    def clear(self) -> None:
-        self._log_operation("CLEAR")
-        super().clear()
+    def __len__(self) -> int:
+        return len(self._sync_rust_cache)
+    
+    def __contains__(self, key: KT) -> bool:
+        return key in self._sync_rust_cache
+    
+    def __del__(self) -> None:
+        try:
+            self.clear()
+            # Cleanup async resources
+            if hasattr(self, '_async_rust_cache') and self._async_rust_cache:
+                try:
+                    self._async_rust_cache.close()
+                except Exception as e:
+                    logger.warning(f"Failed to close async rust cache: {e}")
+            # Don't close the event loop as it may be shared
+        except Exception as e:
+            logger.warning(f"Failed to cleanup async cache during destruction: {e}")
+
