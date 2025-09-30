@@ -522,6 +522,15 @@ class AsyncLruCache(Generic[KT, VT]):
         self._original_max_size = kwargs.get('max_size', 1000)
         self.metrics = kwargs.get('metrics')
         
+        # Store parameters for timed eviction patterns
+        self._clock = kwargs.get('clock')
+        self._prune_unread_entries = kwargs.get('prune_unread_entries', True)
+        self._cache_type = kwargs.get('cache_type')
+        self._keylen = kwargs.get('keylen', 1)
+        self._tree = kwargs.get('tree', False)
+        self._extra_index_cb = kwargs.get('extra_index_cb')
+        self._extra_index = {}
+        
         # Try to create true async Rust cache using global event loop
         try:
             # Try to get current event loop
@@ -549,6 +558,25 @@ class AsyncLruCache(Generic[KT, VT]):
             self._is_async = False
             log_async_info(f"Fallback to sync cache for {self.cache_name}: {e}")
         
+        # Add TreeCache and CacheWrapper support like sync cache
+        if self._is_async:
+            # Auto-detect TreeCache mode
+            from synapse.util.caches.treecache import TreeCache as PyTreeCache
+            self._tree = self._tree or (self._cache_type is PyTreeCache) or self._keylen > 1
+            
+            # Expose cache attribute like sync cache
+            if self._tree:
+                self.cache = TreeCache(self._rust_cache)
+                # Add get_multi method for TreeCache
+                self.get_multi = self._get_multi_impl
+            else:
+                self.cache = CacheWrapper(self._rust_cache, self._clock, self._prune_unread_entries)
+        else:
+            # Fallback uses sync cache which already has these patterns
+            self.cache = self._lru_cache.cache
+            if hasattr(self._lru_cache, 'get_multi'):
+                self.get_multi = self._lru_cache.get_multi
+        
         # Register with Synapse's cleanup system like sync cache
         server_name = kwargs.get('server_name')
         if self.cache_name and server_name:
@@ -567,8 +595,7 @@ class AsyncLruCache(Generic[KT, VT]):
                 self.metrics = MockMetrics()
         
         # Add to global cleanup list like sync cache
-        prune_unread_entries = kwargs.get('prune_unread_entries', True)
-        if prune_unread_entries:
+        if self._prune_unread_entries:
             try:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT, _TimedListNode
                 from synapse.util import Clock
@@ -592,6 +619,21 @@ class AsyncLruCache(Generic[KT, VT]):
                 log_error(f"❌ Failed to add AsyncLruCache '{self.cache_name}' to global cleanup list: {e}")
         
         log_async_info(f"AsyncLruCache({original_name}) -> {self.cache_name} initialized with true async Rust")
+    
+    def invalidate(self, key: KT) -> None:
+        """Sync version of invalidate for compatibility"""
+        self.del_multi(key)
+    
+    async def _async_invalidate(self, key: KT) -> None:
+        """Internal async invalidate method"""
+        try:
+            rust_result = self._rust_cache.invalidate(key)
+            future = asyncio.ensure_future(rust_result)
+            deferred = defer.Deferred.fromFuture(future)
+            await deferred
+        except Exception as e:
+            log_error(f"AsyncLruCache._async_invalidate error: {e}")
+            raise
     
     def get_cache_type(self) -> str:
         """Returns cache type: 'RUST_ASYNC' for true async, 'RUST_SYNC' for fallback."""
@@ -643,6 +685,13 @@ class AsyncLruCache(Generic[KT, VT]):
                     if LRU_ASYNC_DEBUG:
                         log_async_debug(f"get({self.cache_name}): ❌ MISS")
                 else:
+                    # Update access time for time-based eviction if it's a hit
+                    if not self._tree and hasattr(self.cache, '__getitem__') and self._clock:
+                        try:
+                            # This will update the last access time
+                            _ = self.cache[key]
+                        except KeyError:
+                            pass
                     if LRU_ASYNC_DEBUG:
                         log_async_debug(f"get({self.cache_name}): ✅ HIT")
                 # Rust cache already handles metrics via record_cache_hit/miss
@@ -690,6 +739,12 @@ class AsyncLruCache(Generic[KT, VT]):
         log_async_debug(f"set({self.cache_name}): {key}")
         if self._is_async:
             try:
+                # Handle extra index callback like sync cache
+                if self._extra_index_cb:
+                    index_key = self._extra_index_cb(key, value)
+                    mapped_keys = self._extra_index.setdefault(index_key, set())
+                    mapped_keys.add(key)
+                
                 rust_result = self._rust_cache.set(key, value, [])
                 log_async_debug(f"set({self.cache_name}): rust_result type={type(rust_result)}")
                 
@@ -697,6 +752,11 @@ class AsyncLruCache(Generic[KT, VT]):
                 future = asyncio.ensure_future(rust_result)
                 deferred = defer.Deferred.fromFuture(future)
                 await_result = await deferred
+                
+                # Notify cache wrapper of new entry for time-based eviction
+                if not self._tree and hasattr(self.cache, '__setitem__'):
+                    self.cache[key] = value
+                
                 log_async_debug(f"set({self.cache_name}): ✅ SUCCESS")
             except Exception as e:
                 log_async_debug(f"set({self.cache_name}): ❌ ERROR: {e}")
@@ -731,28 +791,61 @@ class AsyncLruCache(Generic[KT, VT]):
             self._lru_cache.set(key, value)
             log_async_debug(f"set_local({self.cache_name}): ✅ SUCCESS (sync)")
     
-    async def invalidate(self, key: KT) -> None:
-        log_async_debug(f"invalidate({self.cache_name}): {key}")
+    async def _async_invalidate(self, key: KT) -> None:
+        """Internal async invalidate method"""
+        log_async_debug(f"_async_invalidate({self.cache_name}): {key}")
         if self._is_async:
             try:
+                # Handle extra index cleanup
+                if self._extra_index_cb:
+                    try:
+                        # Get value for extra index cleanup - use sync check first
+                        if hasattr(self._rust_cache, '__contains__') and key in self._rust_cache:
+                            rust_result = self._rust_cache.get(key, None)
+                            value = await self._await_rust_result(rust_result)
+                            if value is not None:
+                                index_key = self._extra_index_cb(key, value)
+                                mapped_keys = self._extra_index.get(index_key)
+                                if mapped_keys:
+                                    mapped_keys.discard(key)
+                                    if not mapped_keys:
+                                        self._extra_index.pop(index_key, None)
+                    except Exception:
+                        pass  # Ignore errors in cleanup
+                
                 rust_result = self._rust_cache.invalidate(key)
                 
                 # Convert asyncio.Future to Twisted Deferred for Synapse compatibility
                 future = asyncio.ensure_future(rust_result)
                 deferred = defer.Deferred.fromFuture(future)
                 await_result = await deferred
-                log_async_debug(f"invalidate({self.cache_name}): ✅ SUCCESS")
+                log_async_debug(f"_async_invalidate({self.cache_name}): ✅ SUCCESS")
             except Exception as e:
-                log_async_debug(f"invalidate({self.cache_name}): ❌ ERROR: {e}")
+                log_async_debug(f"_async_invalidate({self.cache_name}): ❌ ERROR: {e}")
                 raise
         else:
             self._lru_cache.invalidate(key)
-            log_async_debug(f"invalidate({self.cache_name}): ✅ SUCCESS (sync)")
-        log_async_debug(f"invalidate({self.cache_name}): complete")
+            log_async_debug(f"_async_invalidate({self.cache_name}): ✅ SUCCESS (sync)")
+        log_async_debug(f"_async_invalidate({self.cache_name}): complete")
     
     def invalidate_on_extra_index_local(self, index_key: KT) -> None:
         log_async_debug(f"invalidate_on_extra_index_local({self.cache_name}): {index_key}")
-        if not self._is_async:
+        if self._is_async:
+            # Handle extra index invalidation like sync cache
+            if not self._extra_index_cb:
+                return
+            keys = self._extra_index.pop(index_key, None)
+            if not keys:
+                return
+            for key in keys:
+                try:
+                    # Fire async invalidate without waiting
+                    async_op = self._async_invalidate(key)
+                    d = defer.ensureDeferred(async_op)
+                    d.addErrback(lambda f: log_error(f"AsyncLruCache.invalidate_on_extra_index_local error: {f.value}"))
+                except Exception as e:
+                    log_debug(f"❌ Failed to invalidate key {key}: {e}")
+        else:
             self._lru_cache.invalidate_on_extra_index(index_key)
     
     def invalidate_local(self, key: KT) -> None:
@@ -762,7 +855,7 @@ class AsyncLruCache(Generic[KT, VT]):
             # Sync wrapper for async invalidate() - fire and forget from reactor thread
             try:
                 # Create the async operation and fire it
-                async_op = self.invalidate(key)
+                async_op = self._async_invalidate(key)
                 d = defer.ensureDeferred(async_op)
                 
                 # Add error handler but don't wait for completion
@@ -775,9 +868,9 @@ class AsyncLruCache(Generic[KT, VT]):
         else:
             self._lru_cache.invalidate(key)
             log_async_debug(f"invalidate_local({self.cache_name}): ✅ SUCCESS (sync)")
-        # Duplicate code block removed
     
     async def contains(self, key: KT) -> bool:
+        """Async version of contains"""
         log_async_debug(f"contains({self.cache_name}): {key}")
         if self._is_async:
             try:
@@ -797,10 +890,67 @@ class AsyncLruCache(Generic[KT, VT]):
             log_async_debug(f"contains({self.cache_name}): {'✅ FOUND' if exists else '❌ NOT_FOUND'} (sync)")
         return exists
     
+    def del_multi(self, key: KT) -> None:
+        log_async_debug(f"del_multi({self.cache_name}): {key}")
+        if self._is_async:
+            try:
+                if self._tree and isinstance(key, tuple):
+                    # For TreeCache mode, use prefix deletion
+                    async_op = self._async_invalidate_prefix(key)
+                else:
+                    # Regular single key deletion
+                    async_op = self._async_invalidate(key)
+                d = defer.ensureDeferred(async_op)
+                d.addErrback(lambda f: log_error(f"AsyncLruCache.del_multi error: {f.value}"))
+                log_async_debug(f"del_multi({self.cache_name}): ✅ SUCCESS (async fired)")
+            except Exception as e:
+                log_async_debug(f"❌ Async cache del_multi failed for key {key}: {e}")
+        else:
+            self._lru_cache.del_multi(key)
+    
+    async def _async_invalidate_prefix(self, key: tuple) -> None:
+        """Internal async prefix invalidation for TreeCache"""
+        try:
+            rust_result = self._rust_cache.invalidate_prefix(key)
+            future = asyncio.ensure_future(rust_result)
+            deferred = defer.Deferred.fromFuture(future)
+            await deferred
+        except Exception as e:
+            log_error(f"AsyncLruCache._async_invalidate_prefix error: {e}")
+            raise
+    
+    def _get_multi_impl(self, key: tuple, default=None, update_metrics: bool = True):
+        """Returns a generator yielding all entries under the given key prefix.
+        
+        Can only be used if backed by a tree cache.
+        """
+        if self._is_async:
+            try:
+                # For async cache, we can't easily provide sync access to async results
+                # Return default to indicate "not available synchronously"
+                log_async_debug(f"get_multi({self.cache_name}): async cache, no sync access available")
+                return default
+            except Exception as e:
+                log_debug(f"❌ get_multi failed for key {key}: {e}")
+                return default
+        else:
+            return self._lru_cache._get_multi_impl(key, default, update_metrics)
+    
+    def contains_local(self, key: KT) -> bool:
+        """Sync version of contains for compatibility"""
+        if self._is_async:
+            # For sync access to async cache, return False (not available)
+            return False
+        else:
+            return self._lru_cache.contains(key)
+    
     def clear(self) -> None:
         log_info(f"🧹 AsyncLruCache.clear({self.cache_name}) called")
         log_async_debug(f"clear({self.cache_name})")
         if self._is_async:
+            # Clear extra index
+            self._extra_index.clear()
+            
             # Try async clear first, fallback to sync if not in async context
             try:
                 loop = asyncio.get_running_loop()
