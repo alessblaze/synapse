@@ -26,11 +26,8 @@ import asyncio
 import threading
 from enum import Enum
 
-# Module-level sentinel for cache miss detection
-class _Sentinel(Enum):
-    sentinel = object()
-
-SENTINEL = _Sentinel.sentinel
+# Module-level sentinel for cache miss detection - use identity checks per PEP 661
+_SENTINEL = object()
 
 logger = logging.getLogger(__name__)
 LRU_DEBUG = os.environ.get("SYNAPSE_AMS_LRU_DEBUG") == "1"
@@ -476,8 +473,8 @@ class LruCache(Generic[KT, VT]):
         self.set(key, value)
     
     def __delitem__(self, key: KT) -> None:
-        result = self.pop(key, SENTINEL)
-        if result is SENTINEL:
+        result = self.pop(key, _SENTINEL)
+        if result is _SENTINEL:
             raise KeyError(key)
     
     def set_cache_factor(self, factor: float) -> None:
@@ -497,10 +494,8 @@ class LruCache(Generic[KT, VT]):
         return "RUST"
     
     def __del__(self) -> None:
-        try:
-            self.clear()
-        except Exception as e:
-            logger.warning(f"Failed to clear cache during destruction: {e}")
+        # Avoid nontrivial work in __del__ - use explicit cleanup() method instead
+        pass
 
 ## Must be wondering why? it would help for workers management in future. Event workers if they consists in same base it would be easier to manage.
 ## Also with multithreading sync caches would be blocking, async caches would be non-blocking simultaneous queues via twisted.
@@ -630,9 +625,9 @@ class AsyncLruCache(Generic[KT, VT]):
     async def get_external(self, key: KT, default: Optional[T] = None, update_metrics: bool = True) -> Optional[VT]:
         if self._is_async and self._async_rust_cache:
             try:
-                rust_result = self._async_rust_cache.get(key, SENTINEL)
+                rust_result = self._async_rust_cache.get(key, _SENTINEL)
                 result = await self._await_rust_result(rust_result)
-                return result if result is not SENTINEL else None
+                return result if result is not _SENTINEL else None
             except Exception as e:
                 logger.warning(f"Failed to get external cache value for key {key}: {e}")
                 return None
@@ -681,16 +676,17 @@ class AsyncLruCache(Generic[KT, VT]):
         # This method should invalidate any external cache and then invalidate the LruCache.
         return self._sync_rust_cache.invalidate(key)
     async def _await_rust_result(self, rust_result):
-        """Helper to convert asyncio.Future to Twisted Deferred"""
-        future = None
+        """Helper to convert asyncio awaitable to Twisted Deferred"""
+        task = None
         try:
-            future = asyncio.ensure_future(rust_result)
-            deferred = defer.Deferred.fromFuture(future)
+            # Wrap awaitable into Task before converting to Deferred
+            task = asyncio.ensure_future(rust_result)
+            deferred = defer.Deferred.fromFuture(task)
             return await deferred
         except Exception as e:
-            # Cancel future on error to prevent resource leak
-            if future and not future.done():
-                future.cancel()
+            # Cancel task on error to prevent resource leak
+            if task and not task.done():
+                task.cancel()
             raise    
     def invalidate_on_extra_index_local(self, index_key: KT) -> None:
         if not self._extra_index_cb:
@@ -727,15 +723,6 @@ class AsyncLruCache(Generic[KT, VT]):
         return key in self._sync_rust_cache
     
     def __del__(self) -> None:
-        try:
-            self.clear()
-            # Cleanup async resources
-            if hasattr(self, '_async_rust_cache') and self._async_rust_cache:
-                try:
-                    self._async_rust_cache.close()
-                except Exception as e:
-                    logger.warning(f"Failed to close async rust cache: {e}")
-            # Don't close the event loop as it may be shared
-        except Exception as e:
-            logger.warning(f"Failed to cleanup async cache during destruction: {e}")
+        # Avoid nontrivial work in __del__ - use explicit cleanup() method instead
+        pass
 
