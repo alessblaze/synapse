@@ -41,7 +41,73 @@ Fallback behavior:
 - Maintains full compatibility when only signedjson is available
 """
 
-# Implementation: Try matrices_evolved first, fallback to signedjson
+# Create wrapper classes that expose matrices_evolved through original interface
+class KeyModule:
+    """Wrapper for signedjson.key module that uses matrices_evolved when available"""
+    def __init__(self):
+        try:
+            from matrices_evolved import (
+                SigningKey, VerifyKey,
+                decode_signing_key_base64, decode_verify_key_bytes, encode_verify_key_base64,
+                generate_signing_key, get_verify_key, read_signing_keys, write_signing_keys,
+                is_signing_algorithm_supported
+            )
+            self.SigningKey = SigningKey
+            self.VerifyKey = VerifyKey
+            self.decode_signing_key_base64 = decode_signing_key_base64
+            self.decode_verify_key_bytes = decode_verify_key_bytes
+            self.encode_verify_key_base64 = encode_verify_key_base64
+            self.generate_signing_key = generate_signing_key
+            self.get_verify_key = get_verify_key
+            self.read_signing_keys = read_signing_keys
+            self.write_signing_keys = write_signing_keys
+            self.is_signing_algorithm_supported = is_signing_algorithm_supported
+        except ImportError:
+            import signedjson.key as orig_key
+            self.SigningKey = orig_key.SigningKey
+            self.VerifyKey = orig_key.VerifyKey
+            self.decode_signing_key_base64 = orig_key.decode_signing_key_base64
+            self.decode_verify_key_bytes = orig_key.decode_verify_key_bytes
+            self.encode_verify_key_base64 = orig_key.encode_verify_key_base64
+            self.generate_signing_key = orig_key.generate_signing_key
+            self.get_verify_key = orig_key.get_verify_key
+            self.read_signing_keys = orig_key.read_signing_keys
+            self.write_signing_keys = orig_key.write_signing_keys
+            self.is_signing_algorithm_supported = orig_key.is_signing_algorithm_supported
+        
+        # Always from signedjson.key
+        from signedjson.key import NACL_ED25519, VerifyKeyWithExpiry
+        self.NACL_ED25519 = NACL_ED25519
+        self.VerifyKeyWithExpiry = VerifyKeyWithExpiry
+
+class SignModule:
+    """Wrapper for signedjson.sign module that uses matrices_evolved when available"""
+    def __init__(self):
+        try:
+            from matrices_evolved import (
+                SigningKey, VerifyKey, SignatureVerifyException,
+                sign_json, verify_signed_json, signature_ids
+            )
+            self.SigningKey = SigningKey
+            self.VerifyKey = VerifyKey
+            self.SignatureVerifyException = SignatureVerifyException
+            self.sign_json = sign_json
+            self.verify_signed_json = verify_signed_json
+            self.signature_ids = signature_ids
+        except ImportError:
+            import signedjson.sign as orig_sign
+            self.SigningKey = orig_sign.SigningKey
+            self.VerifyKey = orig_sign.VerifyKey
+            self.SignatureVerifyException = orig_sign.SignatureVerifyException
+            self.sign_json = orig_sign.sign_json
+            self.verify_signed_json = orig_sign.verify_signed_json
+            self.signature_ids = orig_sign.signature_ids
+
+# Create module instances
+key = KeyModule()
+sign = SignModule()
+
+# Export individual functions and types for direct access
 try:
     from matrices_evolved import (
         SigningKey, VerifyKey, SignatureVerifyException,
@@ -49,27 +115,26 @@ try:
         generate_signing_key, get_verify_key, read_signing_keys, write_signing_keys,
         is_signing_algorithm_supported, sign_json, verify_signed_json, signature_ids
     )
-    # Import missing items from signedjson
     from signedjson.types import BaseKey
     from signedjson.key import NACL_ED25519
 except ImportError:
-    from signedjson import key, sign
+    from signedjson import key as orig_key, sign as orig_sign
     from signedjson.types import BaseKey, SigningKey, VerifyKey
     
-    decode_signing_key_base64 = key.decode_signing_key_base64
-    decode_verify_key_bytes = key.decode_verify_key_bytes
-    encode_verify_key_base64 = key.encode_verify_key_base64
-    generate_signing_key = key.generate_signing_key
-    get_verify_key = key.get_verify_key
-    read_signing_keys = key.read_signing_keys
-    write_signing_keys = key.write_signing_keys
-    is_signing_algorithm_supported = key.is_signing_algorithm_supported
-    NACL_ED25519 = key.NACL_ED25519
+    decode_signing_key_base64 = orig_key.decode_signing_key_base64
+    decode_verify_key_bytes = orig_key.decode_verify_key_bytes
+    encode_verify_key_base64 = orig_key.encode_verify_key_base64
+    generate_signing_key = orig_key.generate_signing_key
+    get_verify_key = orig_key.get_verify_key
+    read_signing_keys = orig_key.read_signing_keys
+    write_signing_keys = orig_key.write_signing_keys
+    is_signing_algorithm_supported = orig_key.is_signing_algorithm_supported
+    NACL_ED25519 = orig_key.NACL_ED25519
     
-    sign_json = sign.sign_json
-    verify_signed_json = sign.verify_signed_json
-    signature_ids = sign.signature_ids
-    SignatureVerifyException = sign.SignatureVerifyException
+    sign_json = orig_sign.sign_json
+    verify_signed_json = orig_sign.verify_signed_json
+    signature_ids = orig_sign.signature_ids
+    SignatureVerifyException = orig_sign.SignatureVerifyException
 
 # Conditional import for VerifyKeyWithExpiry
 try:
@@ -78,6 +143,9 @@ except ImportError:
     VerifyKeyWithExpiry = None
 
 __all__ = [
+    # Modules (wrapper classes that use matrices_evolved internally)
+    "key",
+    "sign",
     # Key functions
     "NACL_ED25519",
     "decode_signing_key_base64",

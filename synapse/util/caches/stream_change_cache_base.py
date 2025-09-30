@@ -235,6 +235,28 @@ class StreamChangeCache:
         # Return the metrics object registered with Synapse's cache system
         return self._metrics
     
+    # Internal attributes for test compatibility
+    @property
+    def _cache(self):
+        """Expose internal cache for test compatibility"""
+        if self._rust_cache is not None:
+            return self._rust_cache._cache
+        return self._python_cache._cache
+    
+    @property
+    def _entity_to_key(self):
+        """Expose internal entity mapping for test compatibility"""
+        if self._rust_cache is not None:
+            return self._rust_cache._entity_to_key
+        return self._python_cache._entity_to_key
+    
+    @property
+    def _earliest_known_stream_pos(self):
+        """Expose earliest known stream position for test compatibility"""
+        if self._rust_cache is not None:
+            return self._rust_cache.get_earliest_known_position()
+        return self._python_cache._earliest_known_stream_pos
+    
     def get_cache_type(self) -> str:
         """Returns cache implementation type for debugging."""
         return "RUST_STREAM_CHANGE" if self._rust_cache is not None else "PYTHON_STREAM_CHANGE"
