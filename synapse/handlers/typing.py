@@ -41,7 +41,7 @@ from synapse.types import (
     StreamKeyType,
     UserID,
 )
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import filter_destinations_by_retry_limiter
 from synapse.util.wheel_timer import WheelTimer

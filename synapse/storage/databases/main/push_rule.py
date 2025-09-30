@@ -59,7 +59,7 @@ from synapse.types import JsonDict
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:

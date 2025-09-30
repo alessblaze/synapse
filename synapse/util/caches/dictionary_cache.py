@@ -35,7 +35,7 @@ from typing import (
 
 import attr
 
-from synapse.util.caches.lrucache import LruCache
+from synapse.util.lrucache_compat import LruCache
 from synapse.util.caches.treecache import TreeCache
 
 logger = logging.getLogger(__name__)

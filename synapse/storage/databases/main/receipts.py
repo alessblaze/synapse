@@ -56,7 +56,7 @@ from synapse.types import (
     StrCollection,
 )
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_encoder
 

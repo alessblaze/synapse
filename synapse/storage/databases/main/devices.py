@@ -65,7 +65,7 @@ from synapse.types import (
     get_verify_key_from_cross_signing_key,
 )
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_decoder, json_encoder

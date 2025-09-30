@@ -44,7 +44,7 @@ from synapse.storage.engines._base import IsolationLevel
 from synapse.storage.types import Connection
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:

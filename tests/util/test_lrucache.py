@@ -25,7 +25,7 @@ from unittest.mock import Mock, patch
 
 from synapse.metrics.jemalloc import JemallocStats
 from synapse.types import JsonDict
-from synapse.util.caches.lrucache import LruCache, setup_expire_lru_cache_entries
+from synapse.util.lrucache_compat import LruCache, setup_expire_lru_cache_entries
 from synapse.util.caches.treecache import TreeCache
 
 from tests import unittest

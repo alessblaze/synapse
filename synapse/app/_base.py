@@ -82,7 +82,7 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
 )
 from synapse.types import ISynapseReactor, StrCollection
 from synapse.util import SYNAPSE_VERSION
-from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
+from synapse.util.lrucache_compat import setup_expire_lru_cache_entries
 from synapse.util.daemonize import daemonize_process
 from synapse.util.gai_resolver import GAIResolver
 from synapse.util.rlimit import change_resource_limit

@@ -34,7 +34,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.stream import _filter_results_by_stream
 from synapse.types import RoomStreamToken, StrCollection
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:

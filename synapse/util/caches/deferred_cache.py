@@ -45,7 +45,7 @@ from twisted.python.failure import Failure
 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.async_helpers import ObservableDeferred
-from synapse.util.caches.lrucache import LruCache
+from synapse.util.lrucache_compat import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
 
 cache_pending_metric = Gauge(

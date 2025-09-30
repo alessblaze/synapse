@@ -95,8 +95,8 @@ from synapse.types.storage import _BackgroundUpdates
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import ObservableDeferred, delay_cancellation
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.lrucache import AsyncLruCache
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.lrucache_compat import AsyncLruCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure

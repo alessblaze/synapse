@@ -23,7 +23,7 @@ from unittest.mock import Mock
 
 from synapse.handlers.typing import RoomMember, TypingWriterHandler
 from synapse.replication.tcp.streams import TypingStream
-from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stream_change_cache_compat import StreamChangeCache
 
 from tests.replication._base import BaseStreamTestCase
 

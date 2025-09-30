@@ -46,7 +46,7 @@ from synapse.storage.databases.main.monthly_active_users import (
     MonthlyActiveUsersWorkerStore,
 )
 from synapse.types import JsonDict, UserID
-from synapse.util.caches.lrucache import LruCache
+from synapse.util.lrucache_compat import LruCache
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

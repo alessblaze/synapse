@@ -52,7 +52,7 @@ from synapse.logging.context import make_deferred_yieldable, preserve_fn
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import delay_cancellation
 from synapse.util.caches.deferred_cache import DeferredCache
-from synapse.util.caches.lrucache import LruCache
+from synapse.util.lrucache_compat import LruCache
 
 logger = logging.getLogger(__name__)
 
