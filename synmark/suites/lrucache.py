@@ -22,12 +22,8 @@
 from pyperf import perf_counter
 
 from synapse.types import ISynapseReactor
-<<<<<<< HEAD
-from synapse.util.lrucache_compat import LruCache
-=======
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.clock import Clock
->>>>>>> upstream/develop
 
 
 async def main(reactor: ISynapseReactor, loops: int) -> float:
