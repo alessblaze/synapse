@@ -223,8 +223,10 @@ standard Python libraries for cryptographic operations and caching.
 or by similar means. Also if there is an issue with poetry, do a "poetry install" to clean up dependencies.
 post uninstallation of matrices_evolved, restart synapse.
 
-Enhanced Identity Verification can be enabled by setting the following in your homeserver.yaml
-'''
+Enhanced Identity Verification can be enabled by setting the following in your homeserver.yaml:
+
+.. code-block:: yaml
+
     # Matrix-RTC identity verification keys (both keys required)
     matrix_rtc_v2:
       # Option 1: PEM file paths
@@ -234,8 +236,8 @@ Enhanced Identity Verification can be enabled by setting the following in your h
       server_key_base64: "xNa5/PQV7BAM6c24+VaqY05GI0GcqWkEVvwsE0P0H34="
       client_key_base64: "AbCdEf1234567890..."
       # Note: Provide either both keys or neither (partial config will cause startup error)
-'''      
-it only works with AMS jwt service, and not with the official lk-jwt-service.
+
+It only works with AMS jwt service, and not with the official lk-jwt-service.
 AMS Livekit Service is available at https://github.com/alessblaze/livekit-jwt-service-ams
 Additionally, Matrix-RTC identity verification (v2) functionality is available through
 the `livekit-jwt-service-ams <https://github.com/alessblaze/livekit-jwt-service-ams>`_
