@@ -208,6 +208,28 @@ Identity servers have the job of mapping email addresses and other 3rd Party
 IDs (3PIDs) to Matrix user IDs, as well as verifying the ownership of 3PIDs
 before creating that mapping.
 
+**Identity servers do not store accounts or credentials - these are stored and managed on homeservers.
+Identity Servers are just for mapping 3rd Party IDs to Matrix IDs.**
+
+This process is highly security-sensitive, as there is an obvious risk of spam if it
+is too easy to sign up for Matrix accounts or harvest 3PID data. In the longer
+term, we hope to create a decentralised system to manage it (`matrix-doc #712
+<https://github.com/matrix-org/matrix-doc/issues/712>`_), but in the meantime,
+the role of managing trusted identity in the Matrix ecosystem is farmed out to
+a cluster of known trusted ecosystem partners, who run 'Matrix Identity
+Servers' such as `Sydent <https://github.com/matrix-org/sydent>`_, whose role
+is purely to authenticate and track 3PID logins and publish end-user public
+keys.
+
+You can host your own copy of Sydent, but this will prevent you reaching other
+users in the Matrix ecosystem via their email address, and prevent them finding
+you. We therefore recommend that you use one of the centralised identity servers
+at ``https://matrix.org`` or ``https://vector.im`` for now.
+
+To reiterate: the Identity server will only be used if you choose to associate
+an email address with your account, or send an invite to another user via their
+email address.
+
 📦 Optional Performance Enhancements
 ====================================
 
@@ -247,29 +269,6 @@ project, which is also under a `separate license <https://github.com/alessblaze/
 Both the matrices_evolved package and Matrix-RTC v2 verification are **optional**.
 Synapse will function normally without them, falling back to standard Python libraries
 for cryptographic operations and disabling Matrix-RTC v2 features if not configured.
-
-**Identity servers do not store accounts or credentials - these are stored and managed on homeservers.
-Identity Servers are just for mapping 3rd Party IDs to Matrix IDs.**
-
-This process is highly security-sensitive, as there is an obvious risk of spam if it
-is too easy to sign up for Matrix accounts or harvest 3PID data. In the longer
-term, we hope to create a decentralised system to manage it (`matrix-doc #712
-<https://github.com/matrix-org/matrix-doc/issues/712>`_), but in the meantime,
-the role of managing trusted identity in the Matrix ecosystem is farmed out to
-a cluster of known trusted ecosystem partners, who run 'Matrix Identity
-Servers' such as `Sydent <https://github.com/matrix-org/sydent>`_, whose role
-is purely to authenticate and track 3PID logins and publish end-user public
-keys.
-
-You can host your own copy of Sydent, but this will prevent you reaching other
-users in the Matrix ecosystem via their email address, and prevent them finding
-you. We therefore recommend that you use one of the centralised identity servers
-at ``https://matrix.org`` or ``https://vector.im`` for now.
-
-To reiterate: the Identity server will only be used if you choose to associate
-an email address with your account, or send an invite to another user via their
-email address.
-
 
 🛠️ Development
 ==============
