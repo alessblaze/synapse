@@ -111,20 +111,10 @@ sign = SignModule()
 try:
     from matrices_evolved import (
         SigningKey, VerifyKey, SignatureVerifyException,
-        decode_signing_key_base64, encode_verify_key_base64,
+        decode_signing_key_base64, decode_verify_key_bytes, encode_verify_key_base64,
         generate_signing_key, get_verify_key, read_signing_keys, write_signing_keys,
         is_signing_algorithm_supported, sign_json, verify_signed_json, signature_ids
     )
-    # Wrap decode_verify_key_bytes with debug logging
-    from matrices_evolved import decode_verify_key_bytes as _orig_decode_verify_key_bytes
-    import logging
-    _debug_logger = logging.getLogger(__name__ + ".debug")
-    def decode_verify_key_bytes(key_id, key_bytes):
-        _debug_logger.info(f"🔍 decode_verify_key_bytes: key_id={key_id}, key_bytes={key_bytes!r} (hex: {key_bytes.hex() if isinstance(key_bytes, bytes) else 'not bytes'})")
-        result = _orig_decode_verify_key_bytes(key_id, key_bytes)
-        _debug_logger.info(f"🔍 decode_verify_key_bytes result: {result}")
-        return result
-    
     from signedjson.types import BaseKey
     from signedjson.key import NACL_ED25519
     import logging
@@ -134,15 +124,7 @@ except ImportError:
     from signedjson.types import BaseKey, SigningKey, VerifyKey
     
     decode_signing_key_base64 = orig_key.decode_signing_key_base64
-    # Wrap decode_verify_key_bytes with debug logging
-    import logging
-    _debug_logger = logging.getLogger(__name__ + ".debug")
-    def decode_verify_key_bytes(key_id, key_bytes):
-        _debug_logger.info(f"🔍 decode_verify_key_bytes: key_id={key_id}, key_bytes={key_bytes!r} (hex: {key_bytes.hex() if isinstance(key_bytes, bytes) else 'not bytes'})")
-        result = orig_key.decode_verify_key_bytes(key_id, key_bytes)
-        _debug_logger.info(f"🔍 decode_verify_key_bytes result: {result}")
-        return result
-    
+    decode_verify_key_bytes = orig_key.decode_verify_key_bytes
     encode_verify_key_base64 = orig_key.encode_verify_key_base64
     generate_signing_key = orig_key.generate_signing_key
     get_verify_key = orig_key.get_verify_key
