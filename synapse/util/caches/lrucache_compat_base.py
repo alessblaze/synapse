@@ -96,10 +96,15 @@ class MockMetrics:
         self.inc_misses()
 
 class CacheNode:
-    def __init__(self, cache, key, clock=None, prune_unread_entries=True):
+    def __init__(self, cache, key, value, clock=None, prune_unread_entries=True, callbacks=()):
         self._cache = cache
-        self._key = key
+        self.key = key
+        self.value = value
         self._global_list_node = None
+        
+        # Store callbacks like original _Node
+        self.callbacks = None
+        self.add_callbacks(callbacks)
         
         # Add to global time-based eviction list if enabled
         if prune_unread_entries:
@@ -111,9 +116,42 @@ class CacheNode:
             except Exception as e:
                 logger.warning(f"Failed to add cache node to global time-based eviction list: {e}")
     
+    def get_cache_entry(self):
+        """Return self for compatibility with original _Node.get_cache_entry() method."""
+        return self
+    
+    def add_callbacks(self, callbacks):
+        """Add to stored list of callbacks, removing duplicates."""
+        if not callbacks:
+            return
+        
+        if not self.callbacks:
+            self.callbacks = []
+        
+        for callback in callbacks:
+            if callback not in self.callbacks:
+                self.callbacks.append(callback)
+    
+    def run_and_clear_callbacks(self):
+        """Run all callbacks and clear the stored list of callbacks."""
+        if not self.callbacks:
+            return
+        
+        for callback in self.callbacks:
+            callback()
+        
+        self.callbacks = None
+    
     def drop_from_cache(self):
         # Remove from cache and ensure it's actually gone
-        result = self._cache.pop(self._key, None)
+        try:
+            self._cache.invalidate(self.key)
+        except Exception as e:
+            if LRU_DEBUG:
+                logger.warning(f"Failed to remove key {self.key} from cache: {e}")
+        
+        # Run callbacks before removing from lists
+        self.run_and_clear_callbacks()
         
         # Remove from global list if we were added
         if self._global_list_node:
@@ -122,7 +160,7 @@ class CacheNode:
             except Exception as e:
                 logger.warning(f"Failed to remove cache node from global eviction list: {e}")
         
-        return result is not None
+        return True
     
     def update_last_access(self, clock):
         # Update last access time for time-based eviction
@@ -132,7 +170,9 @@ class CacheNode:
                 self._global_list_node.move_after(GLOBAL_ROOT)
                 self._global_list_node.update_last_access(clock)
             except Exception as e:
-                logger.warning(f"Failed to update cache node last access time: {e}")
+                if LRU_DEBUG:
+                    logger.warning(f"Failed to update cache node last access time: {e} (clock={type(clock)}, node={self._global_list_node})")
+                # Silently ignore errors to avoid log spam
 
 class CacheWrapper(dict):
     def __init__(self, rust_cache, clock=None, prune_unread_entries=True):
@@ -142,70 +182,84 @@ class CacheWrapper(dict):
         self._prune_unread_entries = prune_unread_entries
         self._nodes = {}  # Track CacheNode objects
         
-        # Create nodes for existing entries
-        if prune_unread_entries and clock:
-            try:
-                for key in rust_cache:
-                    self._nodes[key] = CacheNode(rust_cache, key, clock, prune_unread_entries)
-            except (KeyError, RuntimeError):
-                # Empty cache or iteration not supported
-                pass
+        # Don't iterate over rust_cache as it doesn't support iteration
+        # Nodes will be created on-demand when accessed
     
     def __getitem__(self, key):
-        try:
-            # Atomic check and access to avoid race condition
-            value = self._rust_cache[key]
-            
-            # Create or get existing CacheNode - avoid dict lookup if possible
-            node = self._nodes.get(key)
-            if node is None:
-                node = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
-                self._nodes[key] = node
-            
-            # Update last access time
-            if self._clock:
-                node.update_last_access(self._clock)
-            
-            return node
-        except KeyError:
+        # Use Rust cache get method
+        value = self._rust_cache.get(key, _SENTINEL)
+        if value is _SENTINEL:
             raise KeyError(key)
+        
+        # Create or get existing CacheNode - avoid dict lookup if possible
+        node = self._nodes.get(key)
+        if node is None:
+            node = CacheNode(self._rust_cache, key, value, self._clock, self._prune_unread_entries)
+            self._nodes[key] = node
+        
+        # Update last access time
+        if self._clock:
+            node.update_last_access(self._clock)
+        
+        return node
     
     def __setitem__(self, key, value):
         # Store value in underlying cache first
-        self._rust_cache[key] = value
+        self._rust_cache.set(key, value, [])
         
         # Create node for time-based eviction tracking - avoid double lookup
         if self._prune_unread_entries and self._clock:
             if key not in self._nodes:
-                self._nodes[key] = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
+                self._nodes[key] = CacheNode(self._rust_cache, key, value, self._clock, self._prune_unread_entries)
     
     def __contains__(self, key):
-        return key in self._rust_cache
+        return self._rust_cache.contains(key)
     
     def _cleanup_node(self, key):
         # Remove node tracking when key is removed from cache
         self._nodes.pop(key, None)
+    
+    def get(self, key, default=None):
+        return self._rust_cache.get(key, default)
+    
+    def pop(self, key, default=None):
+        self._cleanup_node(key)
+        return self._rust_cache.pop(key, default)
+    
+    def clear(self):
+        self._nodes.clear()
+        return self._rust_cache.clear()
 
 class TreeCache:
     def __init__(self, rust_cache):
         self._rust_cache = rust_cache
     
     def get(self, key, default=None):
-        return self._rust_cache.get_with_tuple(key, default)
+        try:
+            return self._rust_cache.get_with_tuple(key, default)
+        except:
+            return self._rust_cache.get(key, default)
     
     def set(self, key, value, callbacks=None):
-        return self._rust_cache.set_with_tuple(key, value, callbacks or [])
+        try:
+            return self._rust_cache.set_with_tuple(key, value, callbacks or [])
+        except:
+            return self._rust_cache.set(key, value, callbacks or [])
     
     def __getitem__(self, key):
-        if key not in self._rust_cache:
+        result = self.get(key, None)
+        if result is None:
             raise KeyError(key)
-        return self._rust_cache[key]
+        return result
     
     def __setitem__(self, key, value):
         self.set(key, value)
     
     def __contains__(self, key):
         return key in self._rust_cache
+    
+    def pop(self, key, default=None):
+        return self._rust_cache.pop(key, default)
 
 class LruCache(Generic[KT, VT]):
     def __init__(
@@ -235,13 +289,16 @@ class LruCache(Generic[KT, VT]):
                 from synapse.config import cache as cache_config
                 factor = cache_config.properties.default_factor_size
                 self.max_size = int(max_size * factor)
-                log_info(f"🔧 Cache factor applied: {max_size} * {factor} = {self.max_size}")
+                if LRU_INFO:
+                    logger.info(f"🔧 Cache factor applied: {max_size} * {factor} = {self.max_size}")
             except Exception as e:
                 self.max_size = int(max_size)
-                log_info(f"🔧 Cache factor failed: {e}, using original size {self.max_size}")
+                if LRU_INFO:
+                    logger.info(f"🔧 Cache factor failed: {e}, using original size {self.max_size}")
         else:
             self.max_size = int(max_size)
-            log_info(f"🔧 Cache factor disabled, using original size {self.max_size}")
+            if LRU_INFO:
+                logger.info(f"🔧 Cache factor disabled, using original size {self.max_size}")
             
         # Store callbacks for compatibility
         self._size_callback = size_callback
@@ -260,13 +317,15 @@ class LruCache(Generic[KT, VT]):
                     collect_callback=metrics_collection_callback,
                 )
             except Exception as e:
-                log_error(f"❌ Failed to register Rust cache '{cache_name}' with cleanup system: {e}")
+                if LRU_DEBUG:
+                    logger.error(f"❌ Failed to register Rust cache '{cache_name}' with cleanup system: {e}")
                 self.metrics = MockMetrics()
         else:
             self.metrics = MockMetrics() if cache_name else None
             
         self._rust_cache = create_rust_lru_cache(self.max_size, cache_name, self.metrics, None, self._size_callback)
-        log_info(f"🏗️ Created Rust LruCache '{cache_name}' with max_size={self.max_size}")
+        if LRU_INFO:
+            logger.info(f"🏗️ Created Rust LruCache '{cache_name}' with max_size={self.max_size}")
         
         # Auto-detect TreeCache mode
         from synapse.util.caches.treecache import TreeCache as PyTreeCache
@@ -275,8 +334,6 @@ class LruCache(Generic[KT, VT]):
         # Expose cache attribute like original
         if self._tree:
             self.cache = TreeCache(self._rust_cache)
-            # Add get_multi method for TreeCache
-            self.get_multi = self._get_multi_impl
         else:
             self.cache = CacheWrapper(self._rust_cache, clock, prune_unread_entries)
             
@@ -284,25 +341,15 @@ class LruCache(Generic[KT, VT]):
         if prune_unread_entries:
             try:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT, _TimedListNode
-                from synapse.util import Clock
+                from synapse.util.clock import Clock
                 from twisted.internet import reactor
                 
-                class CacheEntry:
-                    def __init__(self, cache_instance):
-                        self.cache = cache_instance
-                    def drop_from_cache(self):
-                        try:
-                            count = self.cache.clear()
-                            log_info(f"🧹 Clearing Sync Cache:")
-                            log_info(f"🧹 Global cleanup cleared {count} entries from sync cache '{self.cache.cache_name}'")
-                        except Exception as e:
-                            log_error(f"❌ Global cleanup failed for sync cache '{self.cache.cache_name}': {e}")
-                
-                cache_entry = CacheEntry(self)
-                self._cleanup_node = _TimedListNode.insert_after(cache_entry, GLOBAL_ROOT)
-                self._cleanup_node.update_last_access(Clock(reactor))
+                # Don't add to global cleanup list - let individual cache entries handle it
+                # The original LruCache adds individual _Node objects, not the cache itself
+                pass
             except Exception as e:
-                log_error(f"❌ Failed to add Rust cache '{cache_name}' to global cleanup list: {e}")
+                if LRU_DEBUG:
+                    logger.error(f"❌ Failed to add Rust cache '{cache_name}' to global cleanup list: {e}")
 
     @overload
     def get(self, key: KT, default: None = None, callbacks: Collection[Callable[[], None]] = (), update_metrics: bool = True, update_last_access: bool = True) -> Optional[VT]: ...
@@ -312,7 +359,7 @@ class LruCache(Generic[KT, VT]):
 
     def get(self, key: KT, default: Optional[T] = None, callbacks: Collection[Callable[[], None]] = (), update_metrics: bool = True, update_last_access: bool = True) -> Union[None, T, VT]:
         if LRU_INFO:
-            log_info(f"🔍 LruCache.get({self.cache_name}): {key}")
+            logger.info(f"🔍 LruCache.get({self.cache_name}): {key}")
         try:
             # Avoid list() conversion in hot path - pass callbacks directly if it's already a list
             cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
@@ -328,16 +375,16 @@ class LruCache(Generic[KT, VT]):
             
             # Rust cache already handles metrics via record_cache_hit/miss
             if LRU_INFO:
-                log_info(f"LruCache.get({self.cache_name}): {'✅ HIT' if result != default else '❌ MISS'}")
+                logger.info(f"LruCache.get({self.cache_name}): {'✅ HIT' if result != default else '❌ MISS'}")
             return result
         except Exception as e:
             if LRU_DEBUG:
-                log_debug(f"❌ Rust cache get failed for key {key}: {e}")
+                logger.debug(f"❌ Rust cache get failed for key {key}: {e}")
             raise
     
     def set(self, key: KT, value: VT, callbacks: Collection[Callable[[], None]] = ()) -> None:
         if LRU_INFO:
-            log_info(f"🔍 LruCache.set({self.cache_name}): {key}")
+            logger.info(f"🔍 LruCache.set({self.cache_name}): {key}")
         try:
             # Handle extra index callback
             if self._extra_index_cb:
@@ -354,18 +401,19 @@ class LruCache(Generic[KT, VT]):
                 self.cache[key] = value
             
             if LRU_INFO:
-                log_info(f"✅ LruCache.set({self.cache_name}): stored")
+                logger.info(f"✅ LruCache.set({self.cache_name}): stored")
         except Exception as e:
             if LRU_DEBUG:
-                log_debug(f"❌ Rust cache set failed for key {key}: {e}")
+                logger.debug(f"❌ Rust cache set failed for key {key}: {e}")
             raise
     
     def setdefault(self, key: KT, value: VT) -> VT:
-        existing = self.get(key)
-        if existing is not None:
-            return existing
-        self.set(key, value)
-        return value
+        try:
+            return self._rust_cache.setdefault(key, value)
+        except Exception as e:
+            if LRU_DEBUG:
+                logger.debug(f"❌ Rust cache setdefault failed for key {key}: {e}")
+            raise
     
     @overload
     def pop(self, key: KT, default: None = None) -> Optional[VT]: ...
@@ -374,7 +422,8 @@ class LruCache(Generic[KT, VT]):
     def pop(self, key: KT, default: T) -> Union[T, VT]: ...
 
     def pop(self, key: KT, default: Optional[T] = None) -> Union[None, T, VT]:
-        log_info(f"🔍 LruCache.pop({self.cache_name}): {key}")
+        if LRU_INFO:
+            logger.info(f"🔍 LruCache.pop({self.cache_name}): {key}")
         try:
             # Handle extra index cleanup
             if self._extra_index_cb and key in self._rust_cache:
@@ -391,14 +440,17 @@ class LruCache(Generic[KT, VT]):
                     logger.warning(f"Failed to cleanup extra index for key {key}: {e}")
             
             result = self._rust_cache.pop(key, default)
-            log_info(f"LruCache.pop({self.cache_name}): {'✅ FOUND' if result != default else '❌ NOT_FOUND'}")
+            if LRU_INFO:
+                logger.info(f"LruCache.pop({self.cache_name}): {'✅ FOUND' if result != default else '❌ NOT_FOUND'}")
             return result
         except Exception as e:
-            log_debug(f"❌ Rust cache pop failed for key {key}: {e}")
+            if LRU_DEBUG:
+                logger.debug(f"❌ Rust cache pop failed for key {key}: {e}")
             raise
     
     def del_multi(self, key: KT) -> None:
-        log_info(f"🔍 LruCache.del_multi({self.cache_name}): {key}")
+        if LRU_INFO:
+            logger.info(f"🔍 LruCache.del_multi({self.cache_name}): {key}")
         try:
             if self._tree and isinstance(key, tuple):
                 # For TreeCache mode, use prefix deletion
@@ -406,29 +458,32 @@ class LruCache(Generic[KT, VT]):
             else:
                 # Regular single key deletion
                 self._rust_cache.invalidate(key)
-            log_info(f"✅ LruCache.del_multi({self.cache_name}): invalidated")
+            if LRU_INFO:
+                logger.info(f"✅ LruCache.del_multi({self.cache_name}): invalidated")
         except Exception as e:
-            log_debug(f"❌ Rust cache del_multi failed for key {key}: {e}")
+            if LRU_DEBUG:
+                logger.debug(f"❌ Rust cache del_multi failed for key {key}: {e}")
             raise
     
     def invalidate(self, key: KT) -> None:
         self.del_multi(key)
     
-
-    
-    def _get_multi_impl(self, key: tuple, default=None, update_metrics: bool = True):
+    def get_multi(self, key: tuple, default=None, update_metrics: bool = True):
         """Returns a generator yielding all entries under the given key prefix.
         
         Can only be used if backed by a tree cache.
         """
+        if not self._tree:
+            raise ValueError("get_multi can only be used with TreeCache")
         try:
             # Use Rust's efficient prefix lookup
-            results = self._rust_cache.get_prefix_children(key)
+            results = self._rust_cache.get_multi(key)
             if results:
                 return results
             return default
         except Exception as e:
-            log_debug(f"❌ get_multi failed for key {key}: {e}")
+            if LRU_DEBUG:
+                logger.debug(f"❌ get_multi failed for key {key}: {e}")
             return default
     
     def contains(self, key: KT) -> bool:
@@ -452,13 +507,19 @@ class LruCache(Generic[KT, VT]):
     def clear(self) -> None:
         try:
             count = self._rust_cache.clear()
-            log_info(f"🧹 LruCache.clear({self.cache_name}): cleared {count} entries")
+            if LRU_INFO:
+                logger.info(f"🧹 LruCache.clear({self.cache_name}): cleared {count} entries")
         except Exception as e:
-            log_error(f"❌ Rust cache clear failed: {e}")
+            if LRU_DEBUG:
+                logger.error(f"❌ Rust cache clear failed: {e}")
             raise
     
     def len(self) -> int:
         return len(self._rust_cache)
+    
+    def capacity(self) -> int:
+        """Returns the maximum capacity of the cache."""
+        return self.max_size
     
     def __len__(self) -> int:
         return len(self._rust_cache)
@@ -485,9 +546,11 @@ class LruCache(Generic[KT, VT]):
             self.max_size = new_size
             try:
                 self._rust_cache.resize(new_size)
-                log_info(f"🔄 Cache {self.cache_name} resized to {new_size}")
+                if LRU_INFO:
+                    logger.info(f"🔄 Cache {self.cache_name} resized to {new_size}")
             except Exception as e:
-                log_error(f"❌ Failed to resize cache {self.cache_name}: {e}")
+                if LRU_DEBUG:
+                    logger.error(f"❌ Failed to resize cache {self.cache_name}: {e}")
     
     def get_cache_type(self) -> str:
         """Returns 'RUST' to indicate this is a Rust-backed cache."""
@@ -590,22 +653,12 @@ class AsyncLruCache(Generic[KT, VT]):
         if self._prune_unread_entries:
             try:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT, _TimedListNode
-                from synapse.util import Clock
+                from synapse.util.clock import Clock
                 from twisted.internet import reactor
                 
-                class AsyncCacheEntry:
-                    def __init__(self, cache_instance):
-                        self.cache = cache_instance
-                    def drop_from_cache(self):
-                        try:
-                            count = self.cache.clear()
-                            log_async_info(f"🧹 Global cleanup cleared async cache '{self.cache.cache_name}'")
-                        except Exception as e:
-                            log_error(f"❌ Global cleanup failed for async cache '{self.cache.cache_name}': {e}")
-                
-                cache_entry = AsyncCacheEntry(self)
-                self._cleanup_node = _TimedListNode.insert_after(cache_entry, GLOBAL_ROOT)
-                self._cleanup_node.update_last_access(Clock(reactor))
+                # Don't add to global cleanup list - let individual cache entries handle it
+                # The original LruCache adds individual _Node objects, not the cache itself
+                pass
                 log_info(f"✅ AsyncLruCache '{self.cache_name}' added to global cleanup list")
             except Exception as e:
                 log_error(f"❌ Failed to add AsyncLruCache '{self.cache_name}' to global cleanup list: {e}")

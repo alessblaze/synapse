@@ -1307,19 +1307,22 @@ files = [
 ]
 
 [[package]]
-name = "matrices-evolved"
-version = "1.0.3"
+name = "matrices_evolved"
+version = "1.0.4"
 description = "High-performance Matrix event signing library"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "matrices_evolved-1.0.3-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:c7661d2cebb9107c07d5676e819011c77c8f20214416af58c075228fb0457491"},
-    {file = "matrices_evolved-1.0.3-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:79f5644125bbbd413fb28072bfa04ccd024b9f62e14dce5960c4619392075e1e"},
+    {file = "matrices_evolved-1.0.4-cp310-cp310-linux_x86_64.whl", hash = "sha256:a80bc66c29ff9a76f32d63bc7a67a28604e0354faab38ec05b62a81ff6150e10"},
 ]
 
 [package.dependencies]
 nanobind = ">=2.0.0"
+
+[package.source]
+type = "file"
+url = "../Matrices-Evolved/dist/matrices_evolved-1.0.4-cp310-cp310-linux_x86_64.whl"
 
 [[package]]
 name = "matrix-common"
@@ -1814,6 +1817,29 @@ files = [
 twisted = ["twisted"]
 
 [[package]]
+name = "psutil"
+version = "7.1.0"
+description = "Cross-platform lib for process and system monitoring."
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "psutil-7.1.0-cp36-abi3-macosx_10_9_x86_64.whl", hash = "sha256:76168cef4397494250e9f4e73eb3752b146de1dd950040b29186d0cce1d5ca13"},
+    {file = "psutil-7.1.0-cp36-abi3-macosx_11_0_arm64.whl", hash = "sha256:5d007560c8c372efdff9e4579c2846d71de737e4605f611437255e81efcca2c5"},
+    {file = "psutil-7.1.0-cp36-abi3-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:22e4454970b32472ce7deaa45d045b34d3648ce478e26a04c7e858a0a6e75ff3"},
+    {file = "psutil-7.1.0-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8c70e113920d51e89f212dd7be06219a9b88014e63a4cec69b684c327bc474e3"},
+    {file = "psutil-7.1.0-cp36-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7d4a113425c037300de3ac8b331637293da9be9713855c4fc9d2d97436d7259d"},
+    {file = "psutil-7.1.0-cp37-abi3-win32.whl", hash = "sha256:09ad740870c8d219ed8daae0ad3b726d3bf9a028a198e7f3080f6a1888b99bca"},
+    {file = "psutil-7.1.0-cp37-abi3-win_amd64.whl", hash = "sha256:57f5e987c36d3146c0dd2528cd42151cf96cd359b9d67cfff836995cc5df9a3d"},
+    {file = "psutil-7.1.0-cp37-abi3-win_arm64.whl", hash = "sha256:6937cb68133e7c97b6cc9649a570c9a18ba0efebed46d8c5dae4c07fa1b67a07"},
+    {file = "psutil-7.1.0.tar.gz", hash = "sha256:655708b3c069387c8b77b072fc429a57d0e214221d01c0a772df7dfedcb3bcd2"},
+]
+
+[package.extras]
+dev = ["abi3audit", "black", "check-manifest", "coverage", "packaging", "pylint", "pyperf", "pypinfo", "pyreadline ; os_name == \"nt\"", "pytest", "pytest-cov", "pytest-instafail", "pytest-subtests", "pytest-xdist", "pywin32 ; os_name == \"nt\" and platform_python_implementation != \"PyPy\"", "requests", "rstcheck", "ruff", "setuptools", "sphinx", "sphinx_rtd_theme", "toml-sort", "twine", "virtualenv", "vulture", "wheel", "wheel ; os_name == \"nt\" and platform_python_implementation != \"PyPy\"", "wmi ; os_name == \"nt\" and platform_python_implementation != \"PyPy\""]
+test = ["pytest", "pytest-instafail", "pytest-subtests", "pytest-xdist", "pywin32 ; os_name == \"nt\" and platform_python_implementation != \"PyPy\"", "setuptools", "wheel ; os_name == \"nt\" and platform_python_implementation != \"PyPy\"", "wmi ; os_name == \"nt\" and platform_python_implementation != \"PyPy\""]
+
+[[package]]
 name = "psycopg2"
 version = "2.9.10"
 description = "psycopg2 - Python-PostgreSQL Database Adapter"
@@ -2168,6 +2194,24 @@ typing-extensions = {version = ">=4.9", markers = "python_version < \"3.13\" and
 [package.extras]
 docs = ["sphinx (!=5.2.0,!=5.2.0.post0,!=7.2.5)", "sphinx_rtd_theme"]
 test = ["pretend", "pytest (>=3.0.1)", "pytest-rerunfailures"]
+
+[[package]]
+name = "pyperf"
+version = "2.9.0"
+description = "Python module to run and analyze benchmarks"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pyperf-2.9.0-py3-none-any.whl", hash = "sha256:215673fb60f3fbbc6c7a90b609b0806d8466fded8dd502bf5731e2b92506076e"},
+    {file = "pyperf-2.9.0.tar.gz", hash = "sha256:dbe0feef8ec1a465df191bba2576149762d15a8c9985c9fea93ab625d875c362"},
+]
+
+[package.dependencies]
+psutil = ">=5.9.0"
+
+[package.extras]
+dev = ["tox"]
 
 [[package]]
 name = "pysaml2"
@@ -3412,4 +3456,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9.0"
-content-hash = "0ced359c5038afcb0cfdcc3f2b73b4747cd1e4b7360f91ed89f7811aca03f708"
+content-hash = "77cfccab884b3704ccc133c8ceec55fe67ce5eb958ef3351ade0145d45a4c6e5"

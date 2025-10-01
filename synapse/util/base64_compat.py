@@ -37,7 +37,17 @@ Fallback behavior:
 
 # Implementation: Try matrices_evolved first, fallback to unpaddedbase64
 try:
-    from matrices_evolved import decode_base64, encode_base64
+    from matrices_evolved import encode_base64
+    # Wrap decode_base64 with debug logging
+    from matrices_evolved import decode_base64 as _orig_decode_base64
+    import logging
+    _debug_logger = logging.getLogger(__name__ + ".debug")
+    def decode_base64(input_str):
+        _debug_logger.info(f"🔍 decode_base64: input={input_str!r} (len={len(input_str) if input_str else 0})")
+        result = _orig_decode_base64(input_str)
+        _debug_logger.info(f"🔍 decode_base64 result: {result!r} (hex: {result.hex() if result else 'None'})")
+        return result
+    
     # Try padded versions from matrices_evolved
     try:
         from matrices_evolved import encode_base64_padded as b64encode_func, decode_base64_padded as b64decode_func
@@ -48,7 +58,17 @@ try:
     import logging
     logging.getLogger(__name__).info("✅ matrices_evolved available, using optimized base64 functions")
 except ImportError:
-    from unpaddedbase64 import decode_base64, encode_base64
+    from unpaddedbase64 import encode_base64
+    # Wrap decode_base64 with debug logging
+    from unpaddedbase64 import decode_base64 as _orig_decode_base64
+    import logging
+    _debug_logger = logging.getLogger(__name__ + ".debug")
+    def decode_base64(input_str):
+        _debug_logger.info(f"🔍 decode_base64: input={input_str!r} (len={len(input_str) if input_str else 0})")
+        result = _orig_decode_base64(input_str)
+        _debug_logger.info(f"🔍 decode_base64 result: {result!r} (hex: {result.hex() if result else 'None'})")
+        return result
+    
     from base64 import b64encode, b64decode
 
 # Standard library base64 functions (always from standard library)

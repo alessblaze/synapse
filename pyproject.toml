@@ -262,7 +262,8 @@ Pympler = { version = "*", optional = true }
 parameterized = { version = ">=0.7.4", optional = true }
 idna = { version = ">=2.5", optional = true }
 pytest = "^8.4.2"
-matrices-evolved = "^1.0.3"
+pyperf = "^2.9.0"
+matrices-evolved = {path = "/mnt/build/Tests/signal/python/github/Matrices-Evolved/dist/matrices_evolved-1.0.4-cp310-cp310-linux_x86_64.whl"}
 
 [tool.poetry.extras]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified
