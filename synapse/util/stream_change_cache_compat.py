@@ -19,10 +19,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 try:
+    # Check if matrices_evolved is available first
+    import matrices_evolved.rust
+    # Only import from stream_change_cache_base if matrices_evolved is available
     from synapse.util.caches.stream_change_cache_base import StreamChangeCache, AllEntitiesChangedResult
-    logger.info("🦀 Using Rust-backed StreamChangeCache implementation")
+    logger.info("✅ matrices_evolved available, using optimized Rust StreamChangeCache")
 except ImportError as e:
-    logger.warning(f"⚠️ Rust StreamChangeCache not available ({e}), falling back to Python implementation")
+    logger.info("⚠️ matrices_evolved not available, using fallback StreamChangeCache")
     from synapse.util.caches.stream_change_cache import StreamChangeCache, AllEntitiesChangedResult
 
 __all__ = ["StreamChangeCache", "AllEntitiesChangedResult"]

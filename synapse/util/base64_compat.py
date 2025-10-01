@@ -45,6 +45,8 @@ try:
         b64decode = b64decode_func
     except ImportError:
         from base64 import b64encode, b64decode
+    import logging
+    logging.getLogger(__name__).info("✅ matrices_evolved available, using optimized base64 functions")
 except ImportError:
     from unpaddedbase64 import decode_base64, encode_base64
     from base64 import b64encode, b64decode

@@ -33,9 +33,15 @@ Fallback behavior:
 
 # Implementation: Try matrices_evolved.rust first, fallback to synapse lrucache
 try:
+    # Check if matrices_evolved is available first
+    import matrices_evolved.rust
+    # Only import from compat_base if matrices_evolved is available
     from synapse.util.caches.lrucache_compat_base import LruCache, AsyncLruCache
     from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
+    import logging
+    logging.getLogger(__name__).info("✅ matrices_evolved available, using optimized Rust LruCache")
 except ImportError:
+    # Fallback to original synapse implementation
     from synapse.util.caches.lrucache import (
         LruCache,
         AsyncLruCache,

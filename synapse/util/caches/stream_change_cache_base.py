@@ -29,7 +29,8 @@ try:
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False
-    logger.warning("Rust StreamChangeCache not available, falling back to Python implementation")
+    if DETAILED_LOGGING:
+        logger.warning("Rust StreamChangeCache not available, falling back to Python implementation")
 
 # Re-export the original for fallback
 from synapse.util.caches.stream_change_cache import StreamChangeCache as PythonStreamChangeCache
@@ -114,7 +115,8 @@ class StreamChangeCache:
                 resize_callback=self.set_cache_factor,
             )
             
-            logger.info(f"✅ Initialized Rust StreamChangeCache '{name}' (max_size={max_size}, prefilled={len(prefill_dict) if prefill_dict else 0})")
+            if DETAILED_LOGGING:
+                logger.info(f"✅ Initialized Rust StreamChangeCache '{name}' (max_size={max_size}, prefilled={len(prefill_dict) if prefill_dict else 0})")
         else:
             # Fallback to Python implementation
             self._python_cache = PythonStreamChangeCache(
@@ -126,19 +128,20 @@ class StreamChangeCache:
             )
             self._rust_cache = None
             self._metrics = self._python_cache.metrics
-            logger.info(f"⚠️ Initialized Python StreamChangeCache '{name}' (Rust not available)")
+            if DETAILED_LOGGING:
+                logger.info(f"⚠️ Initialized Python StreamChangeCache '{name}' (Rust not available)")
     
     def set_cache_factor(self, factor: float) -> bool:
         if self._rust_cache is not None:
             try:
                 new_size = self._rust_cache.set_cache_factor(factor)
-                if logger.isEnabledFor(logging.INFO):
+                if DETAILED_LOGGING:
                     logger.info(f"🦀 Rust cache '{self.name}' resized with factor {factor} -> {new_size}")
                 return True
             except ValueError:
                 return False  # Invalid factor
         changed = self._python_cache.set_cache_factor(factor)
-        if changed and logger.isEnabledFor(logging.INFO):
+        if changed and DETAILED_LOGGING:
             logger.info(f"🐍 Python cache '{self.name}' resized with factor {factor}")
         return changed
     
@@ -263,14 +266,15 @@ class StreamChangeCache:
     
     def log_cache_stats(self) -> None:
         """Log current cache statistics for monitoring."""
-        if self._rust_cache is not None:
-            # For Rust cache, we'll log basic stats without detailed metrics
-            size = len(self._rust_cache)
-            earliest_pos = self._rust_cache.get_earliest_known_position()
-            logger.info(f"🦀 Rust cache '{self.name}' stats: size={size}, earliest_pos={earliest_pos}")
-        else:
-            size = len(self._python_cache._cache)
-            hits = self._python_cache.metrics.hits
-            misses = self._python_cache.metrics.misses
-            earliest_pos = self._python_cache.get_earliest_known_position()
-            logger.info(f"🐍 Python cache '{self.name}' stats: size={size}, hits={hits}, misses={misses}, earliest_pos={earliest_pos}")
+        if DETAILED_LOGGING:
+            if self._rust_cache is not None:
+                # For Rust cache, we'll log basic stats without detailed metrics
+                size = len(self._rust_cache)
+                earliest_pos = self._rust_cache.get_earliest_known_position()
+                logger.info(f"🦀 Rust cache '{self.name}' stats: size={size}, earliest_pos={earliest_pos}")
+            else:
+                size = len(self._python_cache._cache)
+                hits = self._python_cache.metrics.hits
+                misses = self._python_cache.metrics.misses
+                earliest_pos = self._python_cache.get_earliest_known_position()
+                logger.info(f"🐍 Python cache '{self.name}' stats: size={size}, hits={hits}, misses={misses}, earliest_pos={earliest_pos}")

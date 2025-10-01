@@ -208,6 +208,44 @@ Identity servers have the job of mapping email addresses and other 3rd Party
 IDs (3PIDs) to Matrix user IDs, as well as verifying the ownership of 3PIDs
 before creating that mapping.
 
+📦 Optional Performance Enhancements
+====================================
+
+This Synapse implementation includes optional performance optimizations through the
+`Matrices-Evolved <https://github.com/alessblaze/Matrices-Evolved/>`_ package, which
+provides Rust-accelerated cryptographic operations and caching. The package is licensed
+under a `separate license <https://github.com/alessblaze/Matrices-Evolved/blob/main/LICENSE>`_.
+
+Matrices-Evolved can be uninstalled if desired, and Synapse will fall back to using
+standard Python libraries for cryptographic operations and caching.
+"poetry remove matrices_evolved"
+"pip uninstall matrices_evolved"
+or by similar means. Also if there is an issue with poetry, do a "poetry install" to clean up dependencies.
+post uninstallation of matrices_evolved, restart synapse.
+
+Enhanced Identity Verification can be enabled by setting the following in your homeserver.yaml
+'''
+    # Matrix-RTC identity verification keys (both keys required)
+    matrix_rtc_v2:
+      # Option 1: PEM file paths
+      server_key_path: "rtc_server.pem"
+      client_key_path: "rtc_client_public.pem"
+      # Option 2: Base64 encoded raw keys (32 bytes for Ed25519)
+      server_key_base64: "xNa5/PQV7BAM6c24+VaqY05GI0GcqWkEVvwsE0P0H34="
+      client_key_base64: "AbCdEf1234567890..."
+      # Note: Provide either both keys or neither (partial config will cause startup error)
+'''      
+it only works with AMS jwt service, and not with the official lk-jwt-service.
+AMS Livekit Service is available at https://github.com/alessblaze/livekit-jwt-service-ams
+Additionally, Matrix-RTC identity verification (v2) functionality is available through
+the `livekit-jwt-service-ams <https://github.com/alessblaze/livekit-jwt-service-ams>`_
+project, which is also under a `separate license <https://github.com/alessblaze/livekit-jwt-service-ams/blob/main/LICENSE>`_.
+
+**Important**: Please read the respective licenses before using these components.
+Both the matrices_evolved package and Matrix-RTC v2 verification are **optional**.
+Synapse will function normally without them, falling back to standard Python libraries
+for cryptographic operations and disabling Matrix-RTC v2 features if not configured.
+
 **Identity servers do not store accounts or credentials - these are stored and managed on homeservers.
 Identity Servers are just for mapping 3rd Party IDs to Matrix IDs.**
 

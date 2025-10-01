@@ -68,6 +68,7 @@ from synapse.rest.client import (
     user_directory,
     versions,
     voip,
+    identity, #added for our identity/verify endpoint
 )
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     rendezvous.register_servlets,
     auth_metadata.register_servlets,
     thread_subscriptions.register_servlets,
+    identity.register_servlets, #added for our identity/verify endpoint
 )
 
 SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {

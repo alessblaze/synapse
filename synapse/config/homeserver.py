@@ -35,6 +35,7 @@ from .experimental import ExperimentalConfig
 from .federation import FederationConfig
 from .jwt import JWTConfig
 from .key import KeyConfig
+from .rtc_key import RTCKeyConfig
 from .logger import LoggingConfig
 from .mas import MasConfig
 from .metrics import MetricsConfig
@@ -86,6 +87,7 @@ class HomeServerConfig(RootConfig):
         ApiConfig,
         AppServiceConfig,
         KeyConfig,
+        RTCKeyConfig,
         SAML2Config,
         OIDCConfig,
         CasConfig,

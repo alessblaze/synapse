@@ -41,6 +41,8 @@ try:
     from matrices_evolved import encode_canonical_json
     # Import missing items from canonicaljson
     from canonicaljson import json, register_preserialisation_callback
+    import logging
+    logging.getLogger(__name__).info("✅ matrices_evolved available, using optimized encode_canonical_json")
 except ImportError:
     from canonicaljson import encode_canonical_json, json, register_preserialisation_callback
 

@@ -117,6 +117,8 @@ try:
     )
     from signedjson.types import BaseKey
     from signedjson.key import NACL_ED25519
+    import logging
+    logging.getLogger(__name__).info("✅ matrices_evolved available, using optimized signedjson functions")
 except ImportError:
     from signedjson import key as orig_key, sign as orig_sign
     from signedjson.types import BaseKey, SigningKey, VerifyKey
