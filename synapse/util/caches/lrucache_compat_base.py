@@ -20,6 +20,7 @@
 import logging
 import os
 import asyncio
+import threading
 from typing import Any, Callable, Collection, Generic, Optional, TypeVar, Union, overload
 from matrices_evolved.rust import (
     create_rust_lru_cache, 
@@ -257,6 +258,7 @@ class CacheWrapper(dict):
         self._clock = clock
         self._prune_unread_entries = prune_unread_entries
         self._nodes = {}  # Track CacheNodeWrapper objects
+        self._nodes_lock = threading.Lock()  # Thread safety for _nodes access
     
     def get_nodes_for_eviction(self, max_age_ms=None, memory_threshold=None):
         """Get nodes that should be evicted using Rust-based filtering."""
@@ -299,11 +301,12 @@ class CacheWrapper(dict):
         if rust_node is None:
             raise KeyError(key)
         
-        # Create or get existing wrapper
-        node = self._nodes.get(key)
-        if node is None:
-            node = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
-            self._nodes[key] = node
+        # Thread-safe node creation and access
+        with self._nodes_lock:
+            node = self._nodes.get(key)
+            if node is None:
+                node = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
+                self._nodes[key] = node
         
         # Update last access time
         if self._clock:
@@ -323,14 +326,15 @@ class CacheWrapper(dict):
         return self._rust_cache.contains(key)
     
     def _cleanup_node(self, key):
-        # Remove node tracking when key is removed from cache
-        node = self._nodes.pop(key, None)
-        if node and node._global_list_node:
-            try:
-                node._global_list_node.remove_from_list()
-            except Exception as e:
-                if LRU_DEBUG:
-                    logger.warning(f"Failed to remove node from global list: {e}")
+        # Thread-safe node cleanup when key is removed from cache
+        with self._nodes_lock:
+            node = self._nodes.pop(key, None)
+            if node and node._global_list_node:
+                try:
+                    node._global_list_node.remove_from_list()
+                except Exception as e:
+                    if LRU_DEBUG:
+                        logger.warning(f"Failed to remove node from global list: {e}")
     
     def get(self, key, default=None):
         return self._rust_cache.get(key, default)
@@ -340,7 +344,8 @@ class CacheWrapper(dict):
         return self._rust_cache.pop(key, default)
     
     def clear(self):
-        self._nodes.clear()
+        with self._nodes_lock:
+            self._nodes.clear()
         return self._rust_cache.clear()
 
 class TreeCache:
