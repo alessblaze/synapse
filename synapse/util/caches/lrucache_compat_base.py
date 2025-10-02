@@ -24,6 +24,7 @@ import logging
 import os
 import asyncio
 import threading
+import weakref
 from enum import Enum
 
 # Module-level sentinel for cache miss detection - use identity checks per PEP 661
@@ -96,10 +97,9 @@ class MockMetrics:
         self.inc_misses()
 
 class CacheNode:
-    def __init__(self, cache, key, value, clock=None, prune_unread_entries=True, callbacks=()):
+    def __init__(self, cache, key, clock=None, prune_unread_entries=True, callbacks=()):
         self._cache = cache
-        self.key = key
-        self.value = value
+        self._key = key  # Direct reference (weak refs don't work with immutable types)
         self._global_list_node = None
         
         # Store callbacks like original _Node
@@ -115,6 +115,20 @@ class CacheNode:
                     self._global_list_node.update_last_access(clock)
             except Exception as e:
                 logger.warning(f"Failed to add cache node to global time-based eviction list: {e}")
+    
+    @property
+    def key(self):
+        """Get key (minimal duplication)."""
+        return self._key
+    
+    @property
+    def value(self):
+        """Get fresh value from Rust cache (no duplication)."""
+        result = self._cache.get(self._key, _SENTINEL)
+        if result is _SENTINEL:
+            # Key was evicted - return None for compatibility
+            return None
+        return result
     
     def get_cache_entry(self):
         """Return self for compatibility with original _Node.get_cache_entry() method."""
@@ -145,10 +159,10 @@ class CacheNode:
     def drop_from_cache(self):
         # Remove from cache and ensure it's actually gone
         try:
-            self._cache.invalidate(self.key)
+            self._cache.invalidate(self._key)
         except Exception as e:
             if LRU_DEBUG:
-                logger.warning(f"Failed to remove key {self.key} from cache: {e}")
+                logger.warning(f"Failed to remove key {self._key} from cache: {e}")
         
         # Run callbacks before removing from lists
         self.run_and_clear_callbacks()
@@ -186,16 +200,20 @@ class CacheWrapper(dict):
         # Nodes will be created on-demand when accessed
     
     def __getitem__(self, key):
-        # Use Rust cache get method
-        value = self._rust_cache.get(key, _SENTINEL)
-        if value is _SENTINEL:
-            raise KeyError(key)
-        
-        # Create or get existing CacheNode - avoid dict lookup if possible
+        # Create or get existing CacheNode - single dict lookup
         node = self._nodes.get(key)
         if node is None:
-            node = CacheNode(self._rust_cache, key, value, self._clock, self._prune_unread_entries)
+            # Check if key exists in Rust cache
+            if not self._rust_cache.contains(key):
+                raise KeyError(key)
+            node = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
             self._nodes[key] = node
+        else:
+            # Verify existing node's key still exists in cache
+            if not self._rust_cache.contains(key):
+                # Stale node - clean it up and raise KeyError
+                self._cleanup_node(key)
+                raise KeyError(key)
         
         # Update last access time
         if self._clock:
@@ -204,20 +222,26 @@ class CacheWrapper(dict):
         return node
     
     def __setitem__(self, key, value):
-        # Store value in underlying cache first
-        self._rust_cache.set(key, value, [])
+        # Don't store value in Rust cache - it's already there
+        # This method is only called to create tracking nodes
         
         # Create node for time-based eviction tracking - avoid double lookup
         if self._prune_unread_entries and self._clock:
             if key not in self._nodes:
-                self._nodes[key] = CacheNode(self._rust_cache, key, value, self._clock, self._prune_unread_entries)
+                self._nodes[key] = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
     
     def __contains__(self, key):
         return self._rust_cache.contains(key)
     
     def _cleanup_node(self, key):
         # Remove node tracking when key is removed from cache
-        self._nodes.pop(key, None)
+        node = self._nodes.pop(key, None)
+        if node and node._global_list_node:
+            try:
+                node._global_list_node.remove_from_list()
+            except Exception as e:
+                if LRU_DEBUG:
+                    logger.warning(f"Failed to remove node from global list: {e}")
     
     def get(self, key, default=None):
         return self._rust_cache.get(key, default)
@@ -370,11 +394,14 @@ class LruCache(Generic[KT, VT]):
                 cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
                 result = self._rust_cache.get(key, default=default, callbacks=cb_list)
             
+
+            
             # Update access time for time-based eviction if it's a hit
             if result != default and update_last_access and not self._tree:
                 try:
-                    # This will update the last access time
-                    _ = self.cache[key]
+                    # This will update the last access time without accessing .value
+                    node = self.cache[key]
+                    # Just accessing the node is enough to update last access time
                 except KeyError:
                     pass
             
@@ -397,13 +424,13 @@ class LruCache(Generic[KT, VT]):
                 mapped_keys = self._extra_index.setdefault(index_key, set())
                 mapped_keys.add(key)
             
-            # Avoid list() conversion in hot path
-            cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else [])
+            # Optimize callback handling in hot path
+            cb_list = list(callbacks) if callbacks else []
             self._rust_cache.set(key, value, cb_list)
             
             # Notify cache wrapper of new entry for time-based eviction
             if not self._tree:
-                self.cache[key] = value
+                self.cache[key] = value  # Create tracking node
             
             if LRU_INFO:
                 logger.info(f"✅ LruCache.set({self.cache_name}): stored")
@@ -720,7 +747,7 @@ class AsyncLruCache(Generic[KT, VT]):
         self._sync_rust_cache.set(key, value, [])
         # Notify cache wrapper for global integration
         if not self._tree:
-            self.cache[key] = value
+            self.cache[key] = None  # Value already stored in Rust cache
     
     def invalidate_local(self, key: KT) -> None:
         """Remove an entry from the local cache
