@@ -361,9 +361,14 @@ class LruCache(Generic[KT, VT]):
         if LRU_INFO:
             logger.info(f"🔍 LruCache.get({self.cache_name}): {key}")
         try:
-            # Avoid list() conversion in hot path - pass callbacks directly if it's already a list
-            cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
-            result = self._rust_cache.get(key, default=default, callbacks=cb_list)
+            # Use advanced get method if update parameters are non-default
+            if not update_metrics or not update_last_access:
+                cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
+                result = self._rust_cache.get_advanced(key, default, cb_list, update_metrics, update_last_access)
+            else:
+                # Use regular get for better performance
+                cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
+                result = self._rust_cache.get(key, default=default, callbacks=cb_list)
             
             # Update access time for time-based eviction if it's a hit
             if result != default and update_last_access and not self._tree:
@@ -555,6 +560,15 @@ class LruCache(Generic[KT, VT]):
     def get_cache_type(self) -> str:
         """Returns 'RUST' to indicate this is a Rust-backed cache."""
         return "RUST"
+    
+    def get_memory_usage(self) -> int:
+        """Get estimated memory usage in bytes."""
+        try:
+            return self._rust_cache.get_memory_usage()
+        except Exception as e:
+            if LRU_DEBUG:
+                logger.debug(f"❌ Failed to get memory usage: {e}")
+            return 0
     
     def __del__(self) -> None:
         # Avoid nontrivial work in __del__ - use explicit cleanup() method instead
