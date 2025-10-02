@@ -18,7 +18,7 @@
 # The emojis here used for a specific reason: they make it easy to spot in large flowing logs.
 # There is a lot of logging in this module to help diagnose issues with the cache.
 from typing import Any, Callable, Collection, Dict, Generic, Optional, Set, TypeVar, Union, overload
-from matrices_evolved.rust import create_rust_lru_cache, create_async_rust_lru_cache
+from matrices_evolved.rust import create_rust_lru_cache, create_async_rust_lru_cache, RustCacheNode
 from twisted.internet import defer
 import logging
 import os
@@ -96,88 +96,74 @@ class MockMetrics:
     def record_cache_miss(self, cache_name=None): 
         self.inc_misses()
 
-class CacheNode:
-    def __init__(self, cache, key, clock=None, prune_unread_entries=True, callbacks=()):
-        self._cache = cache
-        self._key = key  # Direct reference (weak refs don't work with immutable types)
+class CacheNodeWrapper:
+    """Lightweight wrapper around RustCacheNode for global eviction integration"""
+    def __init__(self, rust_node, clock=None, prune_unread_entries=True):
+        self._rust_node = rust_node
         self._global_list_node = None
-        
-        # Store callbacks like original _Node
-        self.callbacks = None
-        self.add_callbacks(callbacks)
         
         # Add to global time-based eviction list if enabled
         if prune_unread_entries:
             try:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT, _TimedListNode, USE_GLOBAL_LIST
                 if USE_GLOBAL_LIST and clock:
+                    # Create _TimedListNode that points back to this wrapper
                     self._global_list_node = _TimedListNode.insert_after(self, GLOBAL_ROOT)
                     self._global_list_node.update_last_access(clock)
             except Exception as e:
                 logger.warning(f"Failed to add cache node to global time-based eviction list: {e}")
     
+    def get_cache_entry(self):
+        """Required by Synapse's global eviction system - returns self as the cache entry."""
+        return self
+    
     @property
     def key(self):
-        """Get key (minimal duplication)."""
-        return self._key
+        """Get key from Rust node."""
+        return self._rust_node.key
     
     @property
     def value(self):
-        """Get fresh value from Rust cache (no duplication)."""
-        result = self._cache.get(self._key, _SENTINEL)
-        if result is _SENTINEL:
-            # Key was evicted - return None for compatibility
-            return None
-        return result
+        """Get value from Rust node."""
+        result = self._rust_node.value
+        return result if result is not None else None
     
     def get_cache_entry(self):
-        """Return self for compatibility with original _Node.get_cache_entry() method."""
+        """Return self for compatibility."""
         return self
     
     def add_callbacks(self, callbacks):
-        """Add to stored list of callbacks, removing duplicates."""
-        if not callbacks:
-            return
-        
-        if not self.callbacks:
-            self.callbacks = []
-        
-        for callback in callbacks:
-            if callback not in self.callbacks:
-                self.callbacks.append(callback)
+        """Add callbacks to Rust node."""
+        if callbacks:
+            self._rust_node.add_callbacks(list(callbacks))
     
     def run_and_clear_callbacks(self):
-        """Run all callbacks and clear the stored list of callbacks."""
-        if not self.callbacks:
-            return
-        
-        for callback in self.callbacks:
-            callback()
-        
-        self.callbacks = None
+        """Run callbacks in Rust node."""
+        self._rust_node.run_and_clear_callbacks()
     
     def drop_from_cache(self):
-        # Remove from cache and ensure it's actually gone
+        """Remove from cache via Rust node - called by Synapse's global eviction system."""
         try:
-            self._cache.invalidate(self._key)
+            # This is called by Synapse's _expire_old_entries function
+            # We need to remove from both Rust cache and global list
+            result = self._rust_node.drop_from_cache()
+            
+            # Remove from Python global list
+            if self._global_list_node:
+                self._global_list_node.remove_from_list()
+                
+            return result
         except Exception as e:
             if LRU_DEBUG:
-                logger.warning(f"Failed to remove key {self._key} from cache: {e}")
-        
-        # Run callbacks before removing from lists
-        self.run_and_clear_callbacks()
-        
-        # Remove from global list if we were added
-        if self._global_list_node:
-            try:
-                self._global_list_node.remove_from_list()
-            except Exception as e:
-                logger.warning(f"Failed to remove cache node from global eviction list: {e}")
-        
-        return True
+                logger.warning(f"Failed to drop from cache: {e}")
+            return False
     
     def update_last_access(self, clock):
-        # Update last access time for time-based eviction
+        """Update access time for both Rust and global eviction."""
+        # Update Rust LRU position and time tracking
+        self._rust_node.update_last_access(clock)
+        
+        # Update global list time
         if self._global_list_node:
             try:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT
@@ -185,8 +171,60 @@ class CacheNode:
                 self._global_list_node.update_last_access(clock)
             except Exception as e:
                 if LRU_DEBUG:
-                    logger.warning(f"Failed to update cache node last access time: {e} (clock={type(clock)}, node={self._global_list_node})")
-                # Silently ignore errors to avoid log spam
+                    logger.warning(f"Failed to update cache node last access time: {e}")
+    
+    def get_last_access_time(self):
+        """Get last access time from Rust node."""
+        return self._rust_node.get_last_access_time()
+    
+    def get_creation_time(self):
+        """Get creation time from Rust node."""
+        return self._rust_node.get_creation_time()
+    
+    def get_access_count(self):
+        """Get access count from Rust node."""
+        return self._rust_node.get_access_count()
+    
+    def is_older_than(self, time_ms):
+        """Check if node is older than given time."""
+        return self._rust_node.is_older_than(time_ms)
+    
+    def get_memory_usage(self):
+        """Get memory usage from Rust node."""
+        return self._rust_node.get_memory_usage()
+    
+    def is_valid(self):
+        """Check if node's key still exists in cache."""
+        return self._rust_node.is_valid()
+    
+    def get_node_id(self):
+        """Get unique node ID."""
+        return self._rust_node.get_node_id()
+    
+    def should_evict_based_on_time(self, current_time_ms, max_age_ms):
+        """Fast Rust-based time eviction check."""
+        return self._rust_node.is_older_than(current_time_ms - max_age_ms)
+    
+    def get_age_ms(self, current_time_ms):
+        """Get age in milliseconds using Rust time tracking."""
+        return current_time_ms - self._rust_node.get_last_access_time()
+    
+    def should_evict_based_on_memory(self, memory_threshold):
+        """Check if node should be evicted based on memory usage."""
+        try:
+            return self._rust_node.get_memory_usage() > memory_threshold
+        except:
+            return False
+    
+    def get_eviction_priority(self, current_time_ms):
+        """Get eviction priority (higher = evict first) using Rust metrics."""
+        age = self.get_age_ms(current_time_ms)
+        access_count = self._rust_node.get_access_count()
+        memory_usage = self._rust_node.get_memory_usage()
+        
+        # Simple priority: age * memory / access_count
+        # More accessed items have lower priority
+        return (age * memory_usage) / max(access_count, 1)
 
 class CacheWrapper(dict):
     def __init__(self, rust_cache, clock=None, prune_unread_entries=True):
@@ -194,19 +232,53 @@ class CacheWrapper(dict):
         self._rust_cache = rust_cache
         self._clock = clock
         self._prune_unread_entries = prune_unread_entries
-        self._nodes = {}  # Track CacheNode objects
+        self._nodes = {}  # Track CacheNodeWrapper objects
+    
+    def get_nodes_for_eviction(self, max_age_ms=None, memory_threshold=None):
+        """Get nodes that should be evicted using Rust-based filtering."""
+        if not (max_age_ms or memory_threshold):
+            return []
         
-        # Don't iterate over rust_cache as it doesn't support iteration
-        # Nodes will be created on-demand when accessed
+        current_time = None
+        if max_age_ms and self._clock:
+            current_time = self._clock.time_msec()
+        
+        eviction_candidates = []
+        for key, node in self._nodes.items():
+            if not node.is_valid():
+                # Stale node
+                eviction_candidates.append((key, node, float('inf')))
+                continue
+            
+            should_evict = False
+            priority = 0
+            
+            if max_age_ms and current_time:
+                if node.should_evict_based_on_time(current_time, max_age_ms):
+                    should_evict = True
+                    priority = node.get_eviction_priority(current_time)
+            
+            if memory_threshold and node.should_evict_based_on_memory(memory_threshold):
+                should_evict = True
+                priority = max(priority, node.get_eviction_priority(current_time or 0))
+            
+            if should_evict:
+                eviction_candidates.append((key, node, priority))
+        
+        # Sort by priority (highest first)
+        eviction_candidates.sort(key=lambda x: x[2], reverse=True)
+        return eviction_candidates
     
     def __getitem__(self, key):
-        # Create or get existing CacheNode - single dict lookup
+        # Create or get existing CacheNodeWrapper
         node = self._nodes.get(key)
         if node is None:
             # Check if key exists in Rust cache
             if not self._rust_cache.contains(key):
                 raise KeyError(key)
-            node = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
+            # Create Rust node and wrap it
+            rust_node = self._rust_cache.create_node(key)
+            node = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
             self._nodes[key] = node
         else:
             # Verify existing node's key still exists in cache
@@ -222,13 +294,15 @@ class CacheWrapper(dict):
         return node
     
     def __setitem__(self, key, value):
-        # Don't store value in Rust cache - it's already there
-        # This method is only called to create tracking nodes
-        
-        # Create node for time-based eviction tracking - avoid double lookup
+        # Create node for time-based eviction tracking
         if self._prune_unread_entries and self._clock:
             if key not in self._nodes:
-                self._nodes[key] = CacheNode(self._rust_cache, key, self._clock, self._prune_unread_entries)
+                try:
+                    rust_node = self._rust_cache.create_node(key)
+                    self._nodes[key] = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
+                except Exception as e:
+                    if LRU_DEBUG:
+                        logger.warning(f"Failed to create cache node: {e}")
     
     def __contains__(self, key):
         return self._rust_cache.contains(key)
