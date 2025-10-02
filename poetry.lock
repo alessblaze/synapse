@@ -1307,22 +1307,19 @@ files = [
 ]
 
 [[package]]
-name = "matrices_evolved"
+name = "matrices-evolved"
 version = "1.0.4"
 description = "High-performance Matrix event signing library"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "matrices_evolved-1.0.4-cp310-cp310-linux_x86_64.whl", hash = "sha256:341e9469ed0d35d481888e5ca00b0ad3d3f84444ba2c049260ded5a2b5da6bc4"},
+    {file = "matrices_evolved-1.0.4-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:0388c08e66a618469aa2514a48b9ee607c2d9710cc813a3fb240abe9a4d58117"},
+    {file = "matrices_evolved-1.0.4-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:827638c9631e248375168582fdf0a395395af4ef07a595bed7c6bae8b7f0e651"},
 ]
 
 [package.dependencies]
 nanobind = ">=2.0.0"
-
-[package.source]
-type = "file"
-url = "../Matrices-Evolved/dist/matrices_evolved-1.0.4-cp310-cp310-linux_x86_64.whl"
 
 [[package]]
 name = "matrix-common"
@@ -3456,4 +3453,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9.0"
-content-hash = "77cfccab884b3704ccc133c8ceec55fe67ce5eb958ef3351ade0145d45a4c6e5"
+content-hash = "562857c59d42e8561f04fe3da753148d567685a4f94304672a7a69ee52d59f03"

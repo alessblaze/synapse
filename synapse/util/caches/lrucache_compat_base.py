@@ -36,6 +36,7 @@ from synapse.util.caches.treecache import TreeCache as PyTreeCache
 
 # Module-level sentinel for cache miss detection - use identity checks per PEP 661
 _SENTINEL = object()
+_MISS = object()
 
 logger = logging.getLogger(__name__)
 LRU_DEBUG = os.environ.get("SYNAPSE_AMS_LRU_DEBUG") == "1"
@@ -160,10 +161,10 @@ class CacheNodeWrapper:
             python_last_access = getattr(self._global_list_node, 'last_access_ts_secs', 'NOT_SET') if self._global_list_node else 'NO_GLOBAL_NODE'
             rust_access_time_ms = self._rust_node.get_last_access_time()
             rust_access_time_secs = rust_access_time_ms / 1000
-            print(f"[TIMESTAMP_DEBUG] Eviction for key {self.key}:")
-            print(f"  Python last_access_ts_secs: {python_last_access}")
-            print(f"  Rust last_access_time: {rust_access_time_ms} ms = {rust_access_time_secs} seconds")
-            print(f"  Difference: Python - Rust = {python_last_access - rust_access_time_secs if isinstance(python_last_access, (int, float)) else 'N/A'}")
+            logger.info(f"[TIMESTAMP_DEBUG] Eviction for key {self.key}:")
+            logger.info(f"  Python last_access_ts_secs: {python_last_access}")
+            logger.info(f"  Rust last_access_time: {rust_access_time_ms} ms = {rust_access_time_secs} seconds")
+            logger.info(f"  Difference: Python - Rust = {python_last_access - rust_access_time_secs if isinstance(python_last_access, (int, float)) else 'N/A'}")
             
             # This is called by Synapse's _expire_old_entries function
             # We need to remove from both Rust cache and global list
@@ -269,11 +270,15 @@ class CacheWrapper(dict):
         if max_age_ms and self._clock:
             current_time = self._clock.time_msec()
         
+        stale = []
         eviction_candidates = []
-        for key, node in self._nodes.items():
+        
+        with self._nodes_lock:
+            items = list(self._nodes.items())
+        
+        for key, node in items:
             if not node.is_valid():
-                # Stale node
-                eviction_candidates.append((key, node, float('inf')))
+                stale.append(key)
                 continue
             
             should_evict = False
@@ -291,7 +296,16 @@ class CacheWrapper(dict):
             if should_evict:
                 eviction_candidates.append((key, node, priority))
         
-        # Sort by priority (highest first)
+        if stale:
+            with self._nodes_lock:
+                for k in stale:
+                    n = self._nodes.pop(k, None)
+                    if n and n._global_list_node:
+                        try:
+                            n._global_list_node.remove_from_list()
+                        except Exception:
+                            pass
+        
         eviction_candidates.sort(key=lambda x: x[2], reverse=True)
         return eviction_candidates
     
@@ -315,12 +329,15 @@ class CacheWrapper(dict):
         return node
     
     def __setitem__(self, key, value):
-        # Nodes are auto-created by Rust cache when enable_nodes=True
-        # Just ensure we have a wrapper for global eviction integration
-        if self._prune_unread_entries and key not in self._nodes:
-            rust_node = self._rust_cache.get_node_for_key(key)
-            if rust_node:
-                self._nodes[key] = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
+        if not self._prune_unread_entries:
+            return
+        rust_node = self._rust_cache.get_node_for_key(key)
+        if not rust_node:
+            return
+        with self._nodes_lock:
+            if key in self._nodes:
+                return
+            self._nodes[key] = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
     
     def __contains__(self, key):
         return self._rust_cache.contains(key)
@@ -345,6 +362,12 @@ class CacheWrapper(dict):
     
     def clear(self):
         with self._nodes_lock:
+            for node in self._nodes.values():
+                if node._global_list_node:
+                    try:
+                        node._global_list_node.remove_from_list()
+                    except Exception:
+                        pass
             self._nodes.clear()
         return self._rust_cache.clear()
 
@@ -421,6 +444,7 @@ class LruCache(Generic[KT, VT]):
         self._size_callback = size_callback
         self._extra_index_cb = extra_index_cb
         self._extra_index = {}
+        self._clock = clock
         
         # Create metrics if needed
         if cache_name and server_name:
@@ -483,30 +507,22 @@ class LruCache(Generic[KT, VT]):
         if LRU_INFO:
             logger.info(f"🔍 LruCache.get({self.cache_name}): {key}")
         try:
-            # Use advanced get method if update parameters are non-default
+            cb_list = list(callbacks) if callbacks else None
             if not update_metrics or not update_last_access:
-                cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
-                result = self._rust_cache.get_advanced(key, default, cb_list, update_metrics, update_last_access)
+                result = self._rust_cache.get_advanced(key, _MISS, cb_list, update_metrics, update_last_access)
             else:
-                # Use regular get for better performance
-                cb_list = callbacks if isinstance(callbacks, list) else (list(callbacks) if callbacks else None)
-                result = self._rust_cache.get(key, default=default, callbacks=cb_list)
+                result = self._rust_cache.get(key, default=_MISS, callbacks=cb_list)
             
-
-            
-            # Update access time for time-based eviction if it's a hit
-            if result != default and update_last_access and not self._tree:
+            hit = result is not _MISS
+            if hit and update_last_access and not self._tree:
                 try:
-                    # This will update the last access time without accessing .value
-                    node = self.cache[key]
-                    # Just accessing the node is enough to update last access time
+                    _ = self.cache[key]
                 except KeyError:
                     pass
             
-            # Rust cache already handles metrics via record_cache_hit/miss
             if LRU_INFO:
-                logger.info(f"LruCache.get({self.cache_name}): {'✅ HIT' if result != default else '❌ MISS'}")
-            return result
+                logger.info(f"LruCache.get({self.cache_name}): {'✅ HIT' if hit else '❌ MISS'}")
+            return result if hit else default
         except Exception as e:
             if LRU_DEBUG:
                 logger.debug(f"❌ Rust cache get failed for key {key}: {e}")
@@ -583,10 +599,23 @@ class LruCache(Generic[KT, VT]):
             logger.info(f"🔍 LruCache.del_multi({self.cache_name}): {key}")
         try:
             if self._tree and isinstance(key, tuple):
-                # For TreeCache mode, use prefix deletion
+                # Remove wrappers for prefix
+                if hasattr(self.cache, '_nodes_lock'):
+                    with self.cache._nodes_lock:
+                        for k in [k for k in self.cache._nodes.keys() if isinstance(k, tuple) and k[:len(key)] == key]:
+                            self.cache._cleanup_node(k)
+                
+                # Purge extra-index keys sharing prefix
+                for idx in list(self._extra_index.keys()):
+                    keys = self._extra_index[idx]
+                    for k in list(keys):
+                        if isinstance(k, tuple) and k[:len(key)] == key:
+                            keys.discard(k)
+                    if not keys:
+                        self._extra_index.pop(idx, None)
+                
                 self._rust_cache.invalidate_prefix(key)
             else:
-                # Regular single key deletion
                 self._rust_cache.invalidate(key)
             if LRU_INFO:
                 logger.info(f"✅ LruCache.del_multi({self.cache_name}): invalidated")
@@ -609,8 +638,11 @@ class LruCache(Generic[KT, VT]):
             # Use Rust's efficient prefix lookup
             results = self._rust_cache.get_multi(key)
             if results:
-                return results
-            return default
+                # Return generator for compatibility with original LruCache
+                for item in results:
+                    yield item
+            else:
+                return default
         except Exception as e:
             if LRU_DEBUG:
                 logger.debug(f"❌ get_multi failed for key {key}: {e}")
@@ -682,6 +714,18 @@ class LruCache(Generic[KT, VT]):
                 if LRU_DEBUG:
                     logger.error(f"❌ Failed to resize cache {self.cache_name}: {e}")
     
+    def _update_memory_metrics(self, size_delta: int):
+        """Update memory metrics if TRACK_MEMORY_USAGE is enabled"""
+        try:
+            from synapse.util.caches import TRACK_MEMORY_USAGE
+            if TRACK_MEMORY_USAGE and self.metrics:
+                if size_delta > 0:
+                    self.metrics.inc_memory_usage(size_delta)
+                else:
+                    self.metrics.dec_memory_usage(-size_delta)
+        except ImportError:
+            pass
+    
     def get_cache_type(self) -> str:
         """Returns 'RUST' to indicate this is a Rust-backed cache."""
         return "RUST"
@@ -694,6 +738,22 @@ class LruCache(Generic[KT, VT]):
             if LRU_DEBUG:
                 logger.debug(f"❌ Failed to get memory usage: {e}")
             return 0
+    
+    def get_cache_stats(self):
+        """Get cache statistics (hits, misses, evictions, etc.)"""
+        return self._rust_cache.get_cache_stats()
+    
+    def reset_cache_stats(self):
+        """Reset all cache statistics"""
+        return self._rust_cache.reset_cache_stats()
+    
+    def iterate_tree_cache_items(self, prefix_key):
+        """Generator yielding (key, value) pairs for TreeCache compatibility"""
+        if not self._tree:
+            raise ValueError("iterate_tree_cache_items can only be used with TreeCache")
+        results = self._rust_cache.get_multi(prefix_key)
+        for key, value in results:
+            yield key, value
     
     def __del__(self) -> None:
         # Avoid nontrivial work in __del__ - use explicit cleanup() method instead
