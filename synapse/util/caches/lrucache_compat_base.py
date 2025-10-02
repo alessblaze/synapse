@@ -17,15 +17,21 @@
 
 # The emojis here used for a specific reason: they make it easy to spot in large flowing logs.
 # There is a lot of logging in this module to help diagnose issues with the cache.
-from typing import Any, Callable, Collection, Dict, Generic, Optional, Set, TypeVar, Union, overload
-from matrices_evolved.rust import create_rust_lru_cache, create_async_rust_lru_cache, RustCacheNode
-from twisted.internet import defer
 import logging
 import os
 import asyncio
-import threading
-import weakref
-from enum import Enum
+from typing import Any, Callable, Collection, Generic, Optional, TypeVar, Union, overload
+from matrices_evolved.rust import (
+    create_rust_lru_cache, 
+    RustLruCache,
+    AsyncRustLruCache
+)
+from twisted.internet import defer
+from synapse.config import cache as cache_config
+from synapse.util.caches import register_cache
+
+from synapse.util.caches.treecache import TreeCache as PyTreeCache
+
 
 # Module-level sentinel for cache miss detection - use identity checks per PEP 661
 _SENTINEL = object()
@@ -103,15 +109,20 @@ class CacheNodeWrapper:
         self._global_list_node = None
         
         # Add to global time-based eviction list if enabled
+        # Nested import to avoid initialization race conditions
         if prune_unread_entries:
             try:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT, _TimedListNode, USE_GLOBAL_LIST
                 if USE_GLOBAL_LIST and clock:
                     # Create _TimedListNode that points back to this wrapper
                     self._global_list_node = _TimedListNode.insert_after(self, GLOBAL_ROOT)
-                    self._global_list_node.update_last_access(clock)
+                    
+                    # Use Python clock time for compatibility with global eviction
+                    python_clock_time = clock.time() if clock else 0
+                    self._global_list_node.last_access_ts_secs = python_clock_time
             except Exception as e:
-                logger.warning(f"Failed to add cache node to global time-based eviction list: {e}")
+                if LRU_DEBUG:
+                    logger.warning(f"Failed to add cache node to global time-based eviction list: {e}")
     
     def get_cache_entry(self):
         """Required by Synapse's global eviction system - returns self as the cache entry."""
@@ -144,6 +155,15 @@ class CacheNodeWrapper:
     def drop_from_cache(self):
         """Remove from cache via Rust node - called by Synapse's global eviction system."""
         try:
+            # Log timestamp comparison during eviction
+            python_last_access = getattr(self._global_list_node, 'last_access_ts_secs', 'NOT_SET') if self._global_list_node else 'NO_GLOBAL_NODE'
+            rust_access_time_ms = self._rust_node.get_last_access_time()
+            rust_access_time_secs = rust_access_time_ms / 1000
+            print(f"[TIMESTAMP_DEBUG] Eviction for key {self.key}:")
+            print(f"  Python last_access_ts_secs: {python_last_access}")
+            print(f"  Rust last_access_time: {rust_access_time_ms} ms = {rust_access_time_secs} seconds")
+            print(f"  Difference: Python - Rust = {python_last_access - rust_access_time_secs if isinstance(python_last_access, (int, float)) else 'N/A'}")
+            
             # This is called by Synapse's _expire_old_entries function
             # We need to remove from both Rust cache and global list
             result = self._rust_node.drop_from_cache()
@@ -164,11 +184,15 @@ class CacheNodeWrapper:
         self._rust_node.update_last_access(clock)
         
         # Update global list time
+        # Nested import to avoid initialization race conditions
         if self._global_list_node:
             try:
                 from synapse.util.caches.lrucache import GLOBAL_ROOT
                 self._global_list_node.move_after(GLOBAL_ROOT)
-                self._global_list_node.update_last_access(clock)
+                
+                # Use Python clock time for compatibility with global eviction
+                python_clock_time = clock.time() if clock else 0
+                self._global_list_node.last_access_ts_secs = python_clock_time
             except Exception as e:
                 if LRU_DEBUG:
                     logger.warning(f"Failed to update cache node last access time: {e}")
@@ -277,7 +301,7 @@ class CacheWrapper(dict):
             if not self._rust_cache.contains(key):
                 raise KeyError(key)
             # Create Rust node and wrap it
-            rust_node = self._rust_cache.create_node(key)
+            rust_node = self._rust_cache.create_node(key, clock=self._clock)
             node = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
             self._nodes[key] = node
         else:
@@ -298,7 +322,7 @@ class CacheWrapper(dict):
         if self._prune_unread_entries and self._clock:
             if key not in self._nodes:
                 try:
-                    rust_node = self._rust_cache.create_node(key)
+                    rust_node = self._rust_cache.create_node(key, clock=self._clock)
                     self._nodes[key] = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
                 except Exception as e:
                     if LRU_DEBUG:
@@ -384,7 +408,6 @@ class LruCache(Generic[KT, VT]):
         # Apply cache factor like original
         if apply_cache_factor_from_config:
             try:
-                from synapse.config import cache as cache_config
                 factor = cache_config.properties.default_factor_size
                 self.max_size = int(max_size * factor)
                 if LRU_INFO:
@@ -406,7 +429,6 @@ class LruCache(Generic[KT, VT]):
         # Create metrics if needed
         if cache_name and server_name:
             try:
-                from synapse.util.caches import register_cache
                 self.metrics = register_cache(
                     cache_type="rust_lru_cache",
                     cache_name=cache_name,
@@ -426,7 +448,6 @@ class LruCache(Generic[KT, VT]):
             logger.info(f"🏗️ Created Rust LruCache '{cache_name}' with max_size={self.max_size}")
         
         # Auto-detect TreeCache mode
-        from synapse.util.caches.treecache import TreeCache as PyTreeCache
         self._tree = tree or (cache_type is PyTreeCache) or keylen > 1
         
         # Expose cache attribute like original
@@ -438,10 +459,6 @@ class LruCache(Generic[KT, VT]):
         # Add to global cleanup list
         if prune_unread_entries:
             try:
-                from synapse.util.caches.lrucache import GLOBAL_ROOT, _TimedListNode
-                from synapse.util.clock import Clock
-                from twisted.internet import reactor
-                
                 # Don't add to global cleanup list - let individual cache entries handle it
                 # The original LruCache adds individual _Node objects, not the cache itself
                 pass
@@ -697,7 +714,6 @@ class AsyncLruCache(Generic[KT, VT]):
         max_size = original_max_size
         if kwargs.get('apply_cache_factor_from_config', True):
             try:
-                from synapse.config import cache as cache_config
                 max_size = int(original_max_size * cache_config.properties.default_factor_size)
             except Exception as e:
                 logger.warning(f"Failed to apply cache factor from config: {e}")
@@ -720,12 +736,8 @@ class AsyncLruCache(Generic[KT, VT]):
         self._extra_index = {}
         
         # Create local sync Rust cache for sync operations
-        from matrices_evolved.rust import RustLruCache
         self._sync_rust_cache = RustLruCache(max_size, f"{self.cache_name}_sync", self.metrics)
         
-        # Create external async Rust cache for async operations
-        from matrices_evolved.rust import AsyncRustLruCache
-        import asyncio
         try:
             current_loop = asyncio.get_running_loop()
             self._async_rust_cache = AsyncRustLruCache(max_size, f"{self.cache_name}_async", self.metrics)
@@ -751,7 +763,6 @@ class AsyncLruCache(Generic[KT, VT]):
         server_name = kwargs.get('server_name')
         if self.cache_name and server_name:
             try:
-                from synapse.util.caches import register_cache
                 self.metrics = register_cache(
                     cache_type="async_rust_lru_cache",
                     cache_name=self.cache_name,
@@ -767,10 +778,6 @@ class AsyncLruCache(Generic[KT, VT]):
         # Add to global cleanup list like sync cache
         if self._prune_unread_entries:
             try:
-                from synapse.util.caches.lrucache import GLOBAL_ROOT, _TimedListNode
-                from synapse.util.clock import Clock
-                from twisted.internet import reactor
-                
                 # Don't add to global cleanup list - let individual cache entries handle it
                 # The original LruCache adds individual _Node objects, not the cache itself
                 pass
