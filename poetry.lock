@@ -1314,7 +1314,7 @@ optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "matrices_evolved-1.0.4-cp310-cp310-linux_x86_64.whl", hash = "sha256:e3c6451d87d1beb453a613cc7a544a29128fe2bc23e2d6a7642ab86e3869986f"},
+    {file = "matrices_evolved-1.0.4-cp310-cp310-linux_x86_64.whl", hash = "sha256:1bfaa312b99aff13d7f48019a1d47c6cd2a529292f9435eeff06daa354118c0e"},
 ]
 
 [package.dependencies]

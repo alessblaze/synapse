@@ -294,22 +294,16 @@ class CacheWrapper(dict):
         return eviction_candidates
     
     def __getitem__(self, key):
-        # Create or get existing CacheNodeWrapper
+        # Get auto-created node from Rust cache
+        rust_node = self._rust_cache.get_node_for_key(key)
+        if rust_node is None:
+            raise KeyError(key)
+        
+        # Create or get existing wrapper
         node = self._nodes.get(key)
         if node is None:
-            # Check if key exists in Rust cache
-            if not self._rust_cache.contains(key):
-                raise KeyError(key)
-            # Create Rust node and wrap it
-            rust_node = self._rust_cache.create_node(key, clock=self._clock)
             node = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
             self._nodes[key] = node
-        else:
-            # Verify existing node's key still exists in cache
-            if not self._rust_cache.contains(key):
-                # Stale node - clean it up and raise KeyError
-                self._cleanup_node(key)
-                raise KeyError(key)
         
         # Update last access time
         if self._clock:
@@ -318,15 +312,12 @@ class CacheWrapper(dict):
         return node
     
     def __setitem__(self, key, value):
-        # Create node for time-based eviction tracking
-        if self._prune_unread_entries and self._clock:
-            if key not in self._nodes:
-                try:
-                    rust_node = self._rust_cache.create_node(key, clock=self._clock)
-                    self._nodes[key] = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
-                except Exception as e:
-                    if LRU_DEBUG:
-                        logger.warning(f"Failed to create cache node: {e}")
+        # Nodes are auto-created by Rust cache when enable_nodes=True
+        # Just ensure we have a wrapper for global eviction integration
+        if self._prune_unread_entries and key not in self._nodes:
+            rust_node = self._rust_cache.get_node_for_key(key)
+            if rust_node:
+                self._nodes[key] = CacheNodeWrapper(rust_node, self._clock, self._prune_unread_entries)
     
     def __contains__(self, key):
         return self._rust_cache.contains(key)
@@ -444,6 +435,17 @@ class LruCache(Generic[KT, VT]):
             self.metrics = MockMetrics() if cache_name else None
             
         self._rust_cache = create_rust_lru_cache(self.max_size, cache_name, self.metrics, None, self._size_callback)
+        
+        # Activate RustCacheNode system for global eviction
+        if prune_unread_entries:
+            try:
+                self._rust_cache.enable_node_tracking()
+                if LRU_INFO:
+                    logger.info(f"🔗 Enabled node tracking for cache '{cache_name}'")
+            except Exception as e:
+                if LRU_DEBUG:
+                    logger.warning(f"Failed to enable node tracking: {e}")
+        
         if LRU_INFO:
             logger.info(f"🏗️ Created Rust LruCache '{cache_name}' with max_size={self.max_size}")
         
@@ -737,6 +739,16 @@ class AsyncLruCache(Generic[KT, VT]):
         
         # Create local sync Rust cache for sync operations
         self._sync_rust_cache = RustLruCache(max_size, f"{self.cache_name}_sync", self.metrics)
+        
+        # Activate RustCacheNode system for async cache too
+        if self._prune_unread_entries:
+            try:
+                self._sync_rust_cache.enable_node_tracking()
+                if LRU_INFO:
+                    logger.info(f"🔗 Enabled node tracking for async cache '{self.cache_name}'")
+            except Exception as e:
+                if LRU_DEBUG:
+                    logger.warning(f"Failed to enable node tracking for async cache: {e}")
         
         try:
             current_loop = asyncio.get_running_loop()
