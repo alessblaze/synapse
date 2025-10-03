@@ -21,7 +21,7 @@
 # in `poetry export` in the past.
 
 ARG DEBIAN_VERSION=bookworm
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.11
 ARG POETRY_VERSION=2.1.1
 
 ###

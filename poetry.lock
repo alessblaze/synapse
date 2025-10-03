@@ -1316,6 +1316,7 @@ groups = ["main"]
 files = [
     {file = "matrices_evolved-1.0.4-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:0388c08e66a618469aa2514a48b9ee607c2d9710cc813a3fb240abe9a4d58117"},
     {file = "matrices_evolved-1.0.4-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:827638c9631e248375168582fdf0a395395af4ef07a595bed7c6bae8b7f0e651"},
+    {file = "matrices_evolved-1.0.4-cp311-cp311-manylinux_2_34_aarch64.whl", hash = "sha256:4c903fb574eece714d05556c240d209d57bb5f3a8979a17e311e48c947260835"},
 ]
 
 [package.dependencies]

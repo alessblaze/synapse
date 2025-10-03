@@ -845,11 +845,9 @@ class AsyncLruCache(Generic[KT, VT]):
         if self._prune_unread_entries:
             try:
                 self._sync_rust_cache.enable_node_tracking()
-                if LRU_INFO:
-                    logger.info(f"🔗 Enabled node tracking for async cache '{self.cache_name}'")
+                log_info(f"🔗 Enabled node tracking for async cache '{self.cache_name}'")
             except Exception as e:
-                if LRU_DEBUG:
-                    logger.warning(f"Failed to enable node tracking for async cache: {e}")
+                log_debug(f"Failed to enable node tracking for async cache: {e}")
         
         try:
             current_loop = asyncio.get_running_loop()
@@ -863,7 +861,7 @@ class AsyncLruCache(Generic[KT, VT]):
                 self._global_loop = current_loop
                 self._is_async = True
             except Exception as e:
-                logger.error(f"Failed to create async event loop: {e}")
+                log_error(f"Failed to create async event loop: {e}")
                 raise RuntimeError("No asyncio event loop available")
         
         # Create cache wrapper for global integration like sync version
@@ -902,7 +900,7 @@ class AsyncLruCache(Generic[KT, VT]):
                 # Use identity comparison for sentinel check
                 return result if result is not _SENTINEL else default
             except Exception as e:
-                logger.warning(f"Failed to get external cache value for key {key}: {e}")
+                log_debug(f"Failed to get external cache value for key {key}: {e}")
                 return default
         return default
     
@@ -920,7 +918,7 @@ class AsyncLruCache(Generic[KT, VT]):
                 rust_result = self._async_rust_cache.set(key, value, [])
                 await self._await_rust_result(rust_result)
             except Exception as e:
-                logger.warning(f"Failed to set external cache value for key {key}: {e}")
+                log_debug(f"Failed to set external cache value for key {key}: {e}")
     
     def set_local(self, key: KT, value: VT) -> None:
         # Handle extra index callback like sync version
@@ -949,7 +947,7 @@ class AsyncLruCache(Generic[KT, VT]):
             try:
                 self._async_rust_cache.clear()
             except Exception as e:
-                logger.warning(f"Failed to clear async rust cache: {e}")
+                log_debug(f"Failed to clear async rust cache: {e}")
        
     async def invalidate(self, key: KT) -> None:
         # This method should invalidate any external cache and then invalidate the LruCache.
