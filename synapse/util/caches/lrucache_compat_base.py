@@ -33,10 +33,21 @@ from synapse.util.caches import register_cache
 
 from synapse.util.caches.treecache import TreeCache as PyTreeCache
 
+# Use compatibility clock to fix AlreadyCalled errors
+from synapse.util.clock_compat import Clock as CompatClock
 
-# Module-level sentinel for cache miss detection - use identity checks per PEP 661
-_SENTINEL = object()
-_MISS = object()
+
+# Sentinel objects for cache operations - use identity checks per PEP 661
+class _SentinelType:
+    def __repr__(self):
+        return "<SENTINEL>"
+
+class _MissType:
+    def __repr__(self):
+        return "<CACHE_MISS>"
+
+_SENTINEL = _SentinelType()
+_MISS = _MissType()
 
 logger = logging.getLogger(__name__)
 LRU_DEBUG = os.environ.get("SYNAPSE_AMS_LRU_DEBUG") == "1"
@@ -140,10 +151,6 @@ class CacheNodeWrapper:
         """Get value from Rust node."""
         result = self._rust_node.value
         return result if result is not None else None
-    
-    def get_cache_entry(self):
-        """Return self for compatibility."""
-        return self
     
     def add_callbacks(self, callbacks):
         """Add callbacks to Rust node."""
@@ -444,7 +451,13 @@ class LruCache(Generic[KT, VT]):
         self._size_callback = size_callback
         self._extra_index_cb = extra_index_cb
         self._extra_index = {}
-        self._clock = clock
+        
+        # Use compatibility clock if the passed clock is the original Clock
+        if hasattr(clock, '__class__') and clock.__class__.__name__ == 'Clock':
+            # Replace with compatibility clock to fix AlreadyCalled errors
+            self._clock = CompatClock(clock._reactor, clock._server_name)
+        else:
+            self._clock = clock
         
         # Create metrics if needed
         if cache_name and server_name:
@@ -513,6 +526,7 @@ class LruCache(Generic[KT, VT]):
             else:
                 result = self._rust_cache.get(key, default=_MISS, callbacks=cb_list)
             
+            # Use identity comparison for sentinel check
             hit = result is not _MISS
             if hit and update_last_access and not self._tree:
                 try:
@@ -794,7 +808,13 @@ class AsyncLruCache(Generic[KT, VT]):
         self.metrics = kwargs.get('metrics')
         
         # Store parameters for timed eviction patterns
-        self._clock = kwargs.get('clock')
+        clock = kwargs.get('clock')
+        # Use compatibility clock if the passed clock is the original Clock
+        if hasattr(clock, '__class__') and clock.__class__.__name__ == 'Clock':
+            # Replace with compatibility clock to fix AlreadyCalled errors
+            self._clock = CompatClock(clock._reactor, clock._server_name)
+        else:
+            self._clock = clock
         self._prune_unread_entries = kwargs.get('prune_unread_entries', True)
         self._cache_type = kwargs.get('cache_type')
         self._keylen = kwargs.get('keylen', 1)
@@ -802,7 +822,23 @@ class AsyncLruCache(Generic[KT, VT]):
         self._extra_index_cb = kwargs.get('extra_index_cb')
         self._extra_index = {}
         
-        # Create local sync Rust cache for sync operations
+        # Register with Synapse's cleanup system first to get metrics object
+        server_name = kwargs.get('server_name')
+        if self.cache_name and server_name:
+            try:
+                self.metrics = register_cache(
+                    cache_type="async_rust_lru_cache",
+                    cache_name=self.cache_name,
+                    cache=self,
+                    server_name=server_name,
+                    collect_callback=kwargs.get('metrics_collection_callback'),
+                )
+                log_info(f"✅ AsyncLruCache '{self.cache_name}' registered with cleanup system")
+            except Exception as e:
+                log_error(f"❌ Failed to register AsyncLruCache '{self.cache_name}' with cleanup system: {e}")
+                self.metrics = MockMetrics()
+        
+        # Create local sync Rust cache for sync operations with registered metrics
         self._sync_rust_cache = RustLruCache(max_size, f"{self.cache_name}_sync", self.metrics)
         
         # Activate RustCacheNode system for async cache too
@@ -836,22 +872,6 @@ class AsyncLruCache(Generic[KT, VT]):
         else:
             self.cache = CacheWrapper(self._sync_rust_cache, self._clock, self._prune_unread_entries)
         
-        # Register with Synapse's cleanup system like sync cache
-        server_name = kwargs.get('server_name')
-        if self.cache_name and server_name:
-            try:
-                self.metrics = register_cache(
-                    cache_type="async_rust_lru_cache",
-                    cache_name=self.cache_name,
-                    cache=self,
-                    server_name=server_name,
-                    collect_callback=kwargs.get('metrics_collection_callback'),
-                )
-                log_info(f"✅ AsyncLruCache '{self.cache_name}' registered with cleanup system")
-            except Exception as e:
-                log_error(f"❌ Failed to register AsyncLruCache '{self.cache_name}' with cleanup system: {e}")
-                self.metrics = MockMetrics()
-        
         # Add to global cleanup list like sync cache
         if self._prune_unread_entries:
             try:
@@ -879,11 +899,12 @@ class AsyncLruCache(Generic[KT, VT]):
             try:
                 rust_result = self._async_rust_cache.get(key, _SENTINEL)
                 result = await self._await_rust_result(rust_result)
-                return result if result is not _SENTINEL else None
+                # Use identity comparison for sentinel check
+                return result if result is not _SENTINEL else default
             except Exception as e:
                 logger.warning(f"Failed to get external cache value for key {key}: {e}")
-                return None
-        return None
+                return default
+        return default
     
     def get_local(self, key: KT, default: Optional[T] = None, update_metrics: bool = True) -> Optional[VT]:
         return self._sync_rust_cache.get(key, default)
@@ -902,6 +923,12 @@ class AsyncLruCache(Generic[KT, VT]):
                 logger.warning(f"Failed to set external cache value for key {key}: {e}")
     
     def set_local(self, key: KT, value: VT) -> None:
+        # Handle extra index callback like sync version
+        if self._extra_index_cb:
+            index_key = self._extra_index_cb(key, value)
+            mapped_keys = self._extra_index.setdefault(index_key, set())
+            mapped_keys.add(key)
+        
         self._sync_rust_cache.set(key, value, [])
         # Notify cache wrapper for global integration
         if not self._tree:
