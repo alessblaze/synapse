@@ -538,8 +538,10 @@ class LruCache(Generic[KT, VT]):
                 logger.info(f"LruCache.get({self.cache_name}): {'✅ HIT' if hit else '❌ MISS'}")
             return result if hit else default
         except Exception as e:
+            print(f"[CACHE_DEBUG] Rust cache get failed for key {key} in cache {self.cache_name}: {e}")
             if LRU_DEBUG:
-                logger.debug(f"❌ Rust cache get failed for key {key}: {e}")
+                logger.warning(f"❌ Rust cache get failed for key {key}: {e}")
+            # Re-raise the exception to maintain original behavior - cache failures should propagate
             raise
     
     def set(self, key: KT, value: VT, callbacks: Collection[Callable[[], None]] = ()) -> None:
@@ -563,8 +565,10 @@ class LruCache(Generic[KT, VT]):
             if LRU_INFO:
                 logger.info(f"✅ LruCache.set({self.cache_name}): stored")
         except Exception as e:
+            print(f"[CACHE_DEBUG] Rust cache set failed for key {key} in cache {self.cache_name}: {e}")
             if LRU_DEBUG:
-                logger.debug(f"❌ Rust cache set failed for key {key}: {e}")
+                logger.warning(f"❌ Rust cache set failed for key {key}: {e}")
+            # Re-raise the exception to maintain original behavior
             raise
     
     def setdefault(self, key: KT, value: VT) -> VT:
@@ -613,6 +617,7 @@ class LruCache(Generic[KT, VT]):
             logger.info(f"🔍 LruCache.del_multi({self.cache_name}): {key}")
         try:
             if self._tree and isinstance(key, tuple):
+                # For tree cache, we need to invalidate all keys that start with the given prefix
                 # Remove wrappers for prefix
                 if hasattr(self.cache, '_nodes_lock'):
                     with self.cache._nodes_lock:
@@ -628,14 +633,51 @@ class LruCache(Generic[KT, VT]):
                     if not keys:
                         self._extra_index.pop(idx, None)
                 
-                self._rust_cache.invalidate_prefix(key)
+                # For tree cache, invalidate by prefix
+                try:
+                    self._rust_cache.invalidate_prefix(key)
+                except Exception as e:
+                    print(f"[CACHE_DEBUG] Failed to invalidate prefix {key} in cache {self.cache_name}: {e}")
+                    if LRU_DEBUG:
+                        logger.warning(f"Failed to invalidate prefix {key}: {e}")
+                    # Re-raise to maintain original behavior
+                    raise
             else:
-                self._rust_cache.invalidate(key)
+                # Handle extra index cleanup
+                if self._extra_index_cb and key in self._rust_cache:
+                    try:
+                        value = self._rust_cache.get(key)
+                        if value is not None:
+                            index_key = self._extra_index_cb(key, value)
+                            mapped_keys = self._extra_index.get(index_key)
+                            if mapped_keys:
+                                mapped_keys.discard(key)
+                                if not mapped_keys:
+                                    self._extra_index.pop(index_key, None)
+                    except Exception as e:
+                        print(f"[CACHE_DEBUG] Failed to cleanup extra index for key {key}: {e}")
+                        logger.warning(f"Failed to cleanup extra index for key {key}: {e}")
+                
+                # Clean up wrapper node if not tree cache
+                if not self._tree and hasattr(self.cache, '_cleanup_node'):
+                    self.cache._cleanup_node(key)
+                
+                # For regular cache, invalidate the exact key
+                try:
+                    self._rust_cache.invalidate(key)
+                except Exception as e:
+                    print(f"[CACHE_DEBUG] Failed to invalidate key {key} in cache {self.cache_name}: {e}")
+                    if LRU_DEBUG:
+                        logger.warning(f"Failed to invalidate key {key}: {e}")
+                    # Re-raise to maintain original behavior
+                    raise
             if LRU_INFO:
                 logger.info(f"✅ LruCache.del_multi({self.cache_name}): invalidated")
         except Exception as e:
+            print(f"[CACHE_DEBUG] Rust cache del_multi failed for key {key} in cache {self.cache_name}: {e}")
             if LRU_DEBUG:
-                logger.debug(f"❌ Rust cache del_multi failed for key {key}: {e}")
+                logger.warning(f"❌ Rust cache del_multi failed for key {key}: {e}")
+            # Re-raise to maintain original behavior
             raise
     
     def invalidate(self, key: KT) -> None:
@@ -682,7 +724,15 @@ class LruCache(Generic[KT, VT]):
     
     def clear(self) -> None:
         try:
+            # Clear wrapper nodes first
+            if hasattr(self.cache, 'clear'):
+                self.cache.clear()
+            
             count = self._rust_cache.clear()
+            
+            # Clear extra index
+            self._extra_index.clear()
+            
             if LRU_INFO:
                 logger.info(f"🧹 LruCache.clear({self.cache_name}): cleared {count} entries")
         except Exception as e:

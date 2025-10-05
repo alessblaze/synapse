@@ -39,12 +39,12 @@ Fallback behavior:
 try:
     from matrices_evolved import decode_base64, encode_base64
     # Try padded versions from matrices_evolved
+    # there is a small bug in matrices_evolved where sometimes some media thumbnail tests fail on b64encode and b64decode
     try:
-        from matrices_evolved import encode_base64_padded as b64encode_func, decode_base64_padded as b64decode_func
-        b64encode = lambda data: b64encode_func(data).encode() if isinstance(b64encode_func(data), str) else b64encode_func(data)
-        b64decode = b64decode_func
+        from matrices_evolved import encode_base64_padded as b64encode, decode_base64_padded as b64decode
     except ImportError:
         from base64 import b64encode, b64decode
+        pass
     import logging
     logging.getLogger(__name__).info("✅ matrices_evolved available, using optimized base64 functions")
 except ImportError:

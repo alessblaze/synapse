@@ -72,7 +72,7 @@ book/
 
 # ams-test
 /ams-test/
-
+/test/
 # rust
 /target/
 /synapse/*.so

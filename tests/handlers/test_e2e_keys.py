@@ -24,7 +24,7 @@ from typing import Dict, Iterable
 from unittest import mock
 
 from parameterized import parameterized
-from synapse.util import signedjson_compat as signedjson key as key, sign as sign
+from synapse.util.signedjson_compat import key, sign
 
 from twisted.internet.testing import MemoryReactor
 

@@ -20,7 +20,7 @@
 from typing import Callable, FrozenSet, List, Optional, Set
 from unittest.mock import AsyncMock, Mock
 
-from synapse.util import signedjson_compat as signedjson key, sign
+from synapse.util.signedjson_compat import key, sign
 from synapse.util.signedjson_compat import BaseKey, SigningKey
 
 from twisted.internet import defer
