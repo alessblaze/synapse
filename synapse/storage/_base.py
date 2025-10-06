@@ -30,7 +30,7 @@ from synapse.storage.database import (
 )
 from synapse.types import get_domain_from_id
 from synapse.util.caches.descriptors import CachedFunction
-from synapse.util.json import json_decoder
+from synapse.util.json_compat import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

@@ -28,7 +28,7 @@ from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import LoggingTransaction
 from synapse.types import JsonDict
 from synapse.util import stringutils
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 
 @attr.s(slots=True, auto_attribs=True)

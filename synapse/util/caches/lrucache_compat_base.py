@@ -168,10 +168,11 @@ class CacheNodeWrapper:
             python_last_access = getattr(self._global_list_node, 'last_access_ts_secs', 'NOT_SET') if self._global_list_node else 'NO_GLOBAL_NODE'
             rust_access_time_ms = self._rust_node.get_last_access_time()
             rust_access_time_secs = rust_access_time_ms / 1000
-            logger.info(f"[TIMESTAMP_DEBUG] Eviction for key {self.key}:")
-            logger.info(f"  Python last_access_ts_secs: {python_last_access}")
-            logger.info(f"  Rust last_access_time: {rust_access_time_ms} ms = {rust_access_time_secs} seconds")
-            logger.info(f"  Difference: Python - Rust = {python_last_access - rust_access_time_secs if isinstance(python_last_access, (int, float)) else 'N/A'}")
+            if LRU_INFO:
+                logger.info(f"[TIMESTAMP_DEBUG] Eviction for key {self.key}:")
+                logger.info(f"  Python last_access_ts_secs: {python_last_access}")
+                logger.info(f"  Rust last_access_time: {rust_access_time_ms} ms = {rust_access_time_secs} seconds")
+                logger.info(f"  Difference: Python - Rust = {python_last_access - rust_access_time_secs if isinstance(python_last_access, (int, float)) else 'N/A'}")
             
             # This is called by Synapse's _expire_old_entries function
             # We need to remove from both Rust cache and global list
@@ -258,6 +259,38 @@ class CacheNodeWrapper:
         # Simple priority: age * memory / access_count
         # More accessed items have lower priority
         return (age * memory_usage) / max(access_count, 1)
+    
+    def get_creation_time_absolute(self):
+        """Get absolute creation time (epoch milliseconds)."""
+        return self._rust_node.get_creation_time_absolute()
+    
+    def get_creation_time_absolute_seconds(self):
+        """Get absolute creation time (epoch seconds)."""
+        return self._rust_node.get_creation_time_absolute_seconds()
+    
+    def get_last_access_time_absolute(self):
+        """Get absolute last access time (epoch milliseconds)."""
+        return self._rust_node.get_last_access_time_absolute()
+    
+    def get_last_access_time_absolute_seconds(self):
+        """Get absolute last access time (epoch seconds)."""
+        return self._rust_node.get_last_access_time_absolute_seconds()
+    
+    def get_age_since_creation_ms(self, current_time_ms):
+        """Get age since creation in milliseconds."""
+        return self._rust_node.get_age_since_creation_ms(current_time_ms)
+    
+    def get_age_since_creation_seconds(self, current_time_seconds):
+        """Get age since creation in seconds."""
+        return self._rust_node.get_age_since_creation_seconds(current_time_seconds)
+    
+    def get_age_since_creation_relative_ms(self, current_relative_time_ms):
+        """Get age since creation in milliseconds (expects relative time)."""
+        return self._rust_node.get_age_since_creation_relative_ms(current_relative_time_ms)
+    
+    def get_age_since_creation_relative_seconds(self, current_relative_time_seconds):
+        """Get age since creation in seconds (expects relative time)."""
+        return self._rust_node.get_age_since_creation_relative_seconds(current_relative_time_seconds)
 
 class CacheWrapper(dict):
     def __init__(self, rust_cache, clock=None, prune_unread_entries=True):
@@ -544,6 +577,25 @@ class LruCache(Generic[KT, VT]):
             # Re-raise the exception to maintain original behavior - cache failures should propagate
             raise
     
+    def peek(self, key: KT, default: Optional[T] = None) -> Union[None, T, VT]:
+        """Get a value without updating LRU position or metrics."""
+        try:
+            result = self._rust_cache.peek(key, _MISS)
+            return result if result is not _MISS else default
+        except Exception as e:
+            if LRU_DEBUG:
+                logger.warning(f"❌ Rust cache peek failed for key {key}: {e}")
+            raise
+    
+    def get_oldest_key(self) -> Optional[KT]:
+        """Get the oldest key in the cache (for FIFO eviction)."""
+        try:
+            return self._rust_cache.get_oldest_key()
+        except Exception as e:
+            if LRU_DEBUG:
+                logger.warning(f"❌ Rust cache get_oldest_key failed: {e}")
+            return None
+    
     def set(self, key: KT, value: VT, callbacks: Collection[Callable[[], None]] = ()) -> None:
         if LRU_INFO:
             logger.info(f"🔍 LruCache.set({self.cache_name}): {key}")
@@ -556,7 +608,12 @@ class LruCache(Generic[KT, VT]):
             
             # Optimize callback handling in hot path
             cb_list = list(callbacks) if callbacks else []
-            self._rust_cache.set(key, value, cb_list)
+            
+            # Use clock-aware set method if available
+            if hasattr(self._rust_cache, 'set_with_clock') and self._clock:
+                self._rust_cache.set_with_clock(key, value, cb_list, self._clock)
+            else:
+                self._rust_cache.set(key, value, cb_list)
             
             # Notify cache wrapper of new entry for time-based eviction
             if not self._tree:
@@ -820,8 +877,12 @@ class LruCache(Generic[KT, VT]):
             yield key, value
     
     def __del__(self) -> None:
-        # Avoid nontrivial work in __del__ - use explicit cleanup() method instead
-        pass
+        # Clear cache on deletion like original Synapse LruCache
+        try:
+            self.clear()
+        except Exception:
+            # Ignore exceptions in __del__ as they can't be handled properly
+            pass
 
 ## Must be wondering why? it would help for workers management in future. Event workers if they consists in same base it would be easier to manage.
 ## Also with multithreading sync caches would be blocking, async caches would be non-blocking simultaneous queues via twisted.
@@ -942,6 +1003,16 @@ class AsyncLruCache(Generic[KT, VT]):
                 pass
         return result
     
+    async def peek(self, key: KT, default: Optional[T] = None) -> Optional[VT]:
+        """Get a value without updating LRU position or metrics."""
+        try:
+            result = self._sync_rust_cache.peek(key, _MISS)
+            return result if result is not _MISS else default
+        except Exception as e:
+            if LRU_DEBUG:
+                logger.warning(f"❌ Async cache peek failed for key {key}: {e}")
+            raise
+    
     async def get_external(self, key: KT, default: Optional[T] = None, update_metrics: bool = True) -> Optional[VT]:
         if self._is_async and self._async_rust_cache:
             try:
@@ -1050,6 +1121,11 @@ class AsyncLruCache(Generic[KT, VT]):
         return key in self._sync_rust_cache
     
     def __del__(self) -> None:
-        # Avoid nontrivial work in __del__ - use explicit cleanup() method instead
-        pass
+        # Clear cache on deletion like original Synapse LruCache
+        try:
+            self.clear()
+        except Exception:
+            # Ignore exceptions in __del__ as they can't be handled properly
+            pass
+
 

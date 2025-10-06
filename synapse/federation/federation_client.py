@@ -78,7 +78,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.async_helpers import concurrently_execute
-from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.expiring_cache_compat import ExpiringCache
 from synapse.util.retryutils import NotRetryingDestination
 
 if TYPE_CHECKING:

@@ -43,7 +43,7 @@ from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import DeviceListUpdates, JsonMapping
 from synapse.util.caches.descriptors import _CacheContext, cached
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

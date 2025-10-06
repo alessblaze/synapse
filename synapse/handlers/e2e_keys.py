@@ -46,7 +46,7 @@ from synapse.types import (
 )
 from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.cancellation import cancellable
-from synapse.util.json import json_decoder
+from synapse.util.json_compat import json_decoder
 from synapse.util.retryutils import (
     NotRetryingDestination,
     filter_destinations_by_retry_limiter,

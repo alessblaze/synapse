@@ -59,7 +59,7 @@ from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
-from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.expiring_cache_compat import ExpiringCache
 from synapse.util.metrics import Measure, measure_func
 from synapse.util.stringutils import shortstr
 

@@ -63,7 +63,7 @@ from synapse.util.caches.descriptors import cached
 from synapse.util.lrucache_compat import LruCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

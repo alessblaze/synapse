@@ -91,7 +91,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
 from synapse.util.clock import Clock
-from synapse.util.json import json_decoder
+from synapse.util.json_compat import json_decoder
 from synapse.util.metrics import Measure
 from synapse.util.stringutils import parse_and_validate_server_name
 

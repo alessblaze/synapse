@@ -59,7 +59,7 @@ from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.lrucache_compat import LruCache
-from synapse.util.json import json_decoder
+from synapse.util.json_compat import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
 

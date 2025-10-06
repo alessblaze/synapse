@@ -81,7 +81,7 @@ from synapse.types import (
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
-from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.expiring_cache_compat import ExpiringCache
 from synapse.util.lrucache_compat import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 from synapse.util.metrics import Measure

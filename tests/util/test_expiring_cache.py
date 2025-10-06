@@ -21,7 +21,7 @@
 
 from typing import List
 
-from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.expiring_cache_compat import ExpiringCache
 
 from tests.server import get_clock
 
@@ -98,17 +98,40 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
             expiry_ms=1000,
         )
 
+        print(f"DEBUG: Initial clock time: {clock.time_msec()}")
         cache["key"] = 1
+        print(f"DEBUG: After setting key, clock time: {clock.time_msec()}")
+        
         reactor.advance(0.5)
+        print(f"DEBUG: After advance(0.5), clock time: {clock.time_msec()}")
         cache["key2"] = 2
+        print(f"DEBUG: After setting key2, clock time: {clock.time_msec()}")
 
-        self.assertEqual(cache.get("key"), 1)
-        self.assertEqual(cache.get("key2"), 2)
+        print(f"DEBUG: About to get key, clock time: {clock.time_msec()}")
+        result1 = cache.get("key")
+        print(f"DEBUG: cache.get('key') returned: {result1}")
+        self.assertEqual(result1, 1)
+        
+        result2 = cache.get("key2")
+        print(f"DEBUG: cache.get('key2') returned: {result2}")
+        self.assertEqual(result2, 2)
 
         reactor.advance(0.9)
-        self.assertEqual(cache.get("key"), None)
-        self.assertEqual(cache.get("key2"), 2)
+        print(f"DEBUG: After advance(0.9), clock time: {clock.time_msec()}")
+        result3 = cache.get("key")
+        print(f"DEBUG: cache.get('key') after 0.9s returned: {result3}")
+        self.assertEqual(result3, None)
+        
+        result4 = cache.get("key2")
+        print(f"DEBUG: cache.get('key2') after 0.9s returned: {result4}")
+        self.assertEqual(result4, 2)
 
         reactor.advance(1)
-        self.assertEqual(cache.get("key"), None)
-        self.assertEqual(cache.get("key2"), None)
+        print(f"DEBUG: After advance(1), clock time: {clock.time_msec()}")
+        result5 = cache.get("key")
+        print(f"DEBUG: cache.get('key') after 1s returned: {result5}")
+        self.assertEqual(result5, None)
+        
+        result6 = cache.get("key2")
+        print(f"DEBUG: cache.get('key2') after 1s returned: {result6}")
+        self.assertEqual(result6, None)

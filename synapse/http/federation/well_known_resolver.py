@@ -37,7 +37,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.types import ISynapseThreadlessReactor
 from synapse.util.caches.ttlcache import TTLCache
 from synapse.util.clock import Clock
-from synapse.util.json import json_decoder
+from synapse.util.json_compat import json_decoder
 from synapse.util.metrics import Measure
 
 # period to cache .well-known results for by default

@@ -23,7 +23,7 @@ from synapse.storage.database import LoggingTransaction, StoreError
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 logger = logging.getLogger(__name__)
 

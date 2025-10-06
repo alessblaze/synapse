@@ -82,7 +82,7 @@ from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
 from synapse.util.clock import Clock
 from synapse.util.iterutils import chunk_seq
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 if TYPE_CHECKING:
     import opentracing

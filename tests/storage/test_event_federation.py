@@ -54,7 +54,7 @@ from synapse.storage.types import Cursor
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 import tests.unittest
 import tests.utils

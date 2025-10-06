@@ -88,7 +88,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
-from synapse.util.json import json_decoder
+from synapse.util.json_compat import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

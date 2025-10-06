@@ -45,7 +45,7 @@ from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
-from synapse.util.json import json_decoder
+from synapse.util.json_compat import json_decoder
 
 from . import introspection_response_timer
 

@@ -59,7 +59,7 @@ from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util.iterutils import batch_iter
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

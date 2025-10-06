@@ -36,7 +36,7 @@ from synapse.types.handlers.sliding_sync import (
     RoomSyncConfig,
 )
 from synapse.util.caches.descriptors import cached
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

@@ -31,7 +31,7 @@ from synapse.storage.databases.main.account_data import AccountDataWorkerStore
 from synapse.storage.util.id_generators import AbstractStreamIdGenerator
 from synapse.types import JsonDict, JsonMapping
 from synapse.util.caches.descriptors import cached
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 logger = logging.getLogger(__name__)
 

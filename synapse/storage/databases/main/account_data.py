@@ -50,7 +50,7 @@ from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping
 from synapse.util.caches.descriptors import cached
 from synapse.util.stream_change_cache_compat import StreamChangeCache
-from synapse.util.json import json_encoder
+from synapse.util.json_compat import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

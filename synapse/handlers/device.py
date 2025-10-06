@@ -74,7 +74,7 @@ from synapse.types import (
 )
 from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
-from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.expiring_cache_compat import ExpiringCache
 from synapse.util.cancellation import cancellable
 from synapse.util.metrics import measure_func
 from synapse.util.retryutils import (
