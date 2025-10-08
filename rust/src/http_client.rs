@@ -12,7 +12,7 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future, sync::OnceLock};
+use std::{collections::HashMap, future::Future, sync::OnceLock, time::Duration};
 
 use anyhow::Context;
 use futures::TryStreamExt;
@@ -59,9 +59,16 @@ struct PyTokioRuntime {
 #[pymethods]
 impl PyTokioRuntime {
     fn start(&mut self) -> PyResult<()> {
-        // TODO: allow customization of the runtime like the number of threads
+       // Use half of available CPU cores, minimum 1 thread, customization is
+       // unneccessary rather using half of whats available makes sense.
+       // hardocded (4) may have undefined behaviour for single thread available
+       // systems
+        let worker_threads = std::thread::available_parallelism()
+            .map(|n| (n.get() / 2).max(1))
+            .unwrap_or(1);
+        
         let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(4)
+            .worker_threads(worker_threads)
             .enable_all()
             .build()?;
 
@@ -108,6 +115,11 @@ fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>
 
 /// Install a new Tokio runtime on the reactor instance.
 fn install_runtime(reactor: &Bound<PyAny>) -> PyResult<()> {
+    // Guard against double initialization
+    if reactor.hasattr(TOKIO_RUNTIME_ATTR)? {
+        return Ok(());
+    }
+
     let py = reactor.py();
     let runtime = PyTokioRuntime { runtime: None };
     let runtime = runtime.into_pyobject(py)?;
@@ -178,6 +190,9 @@ impl HttpClient {
         Ok(HttpClient {
             client: reqwest::Client::builder()
                 .user_agent(user_agent)
+                .connect_timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(60))
+                .read_timeout(Duration::from_secs(30))
                 .build()
                 .context("building reqwest client")?,
             reactor: reactor.unbind(),

@@ -264,7 +264,7 @@ idna = { version = ">=2.5", optional = true }
 pytest = "^8.4.2"
 pyperf = "^2.9.0"
 psycopg2-binary = "^2.9.10"
-matrices-evolved = "^1.0.7"
+matrices-evolved = "^1.0.8"
 
 [tool.poetry.extras]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified
