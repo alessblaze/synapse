@@ -751,10 +751,7 @@ class LruCache(Generic[KT, VT]):
     
     def setdefault(self, key: KT, value: VT) -> VT:
         try:
-            result = self._rust_cache.setdefault(key, value)
-            if not self._tree and key not in self.cache._nodes:
-                self.cache[key] = None  # Create tracking node
-            return result
+            return self._rust_cache.setdefault(key, value)
         except Exception as e:
             if LRU_DEBUG:
                 logger.debug(f"❌ Rust cache setdefault failed for key {key}: {e}")
@@ -770,10 +767,6 @@ class LruCache(Generic[KT, VT]):
         if LRU_INFO:
             logger.info(f"🔍 LruCache.pop({self.cache_name}): {key}")
         try:
-            # CRITICAL FIX: Clean up wrapper node FIRST to detach from global list
-            if not self._tree and hasattr(self.cache, '_cleanup_node'):
-                self.cache._cleanup_node(key)
-            
             # Handle extra index cleanup
             if self._extra_index_cb and key in self._rust_cache:
                 try:
@@ -801,23 +794,7 @@ class LruCache(Generic[KT, VT]):
         if LRU_INFO:
             logger.info(f"🔍 LruCache.del_multi({self.cache_name}): {key}")
         try:
-            # DEADLOCK FIX: Snapshot keys under lock for cleanup, then cleanup outside
-            keys_to_cleanup = []
-            if not self._tree and hasattr(self.cache, '_nodes_lock'):
-                with self.cache._nodes_lock:
-                    if isinstance(key, tuple):
-                        # Prefix match for tuple keys
-                        keys_to_cleanup = [k for k in self.cache._nodes.keys() if isinstance(k, tuple) and k[:len(key)] == key]
-                    else:
-                        # Exact match for single keys
-                        if key in self.cache._nodes:
-                            keys_to_cleanup = [key]
-            
-            # Cleanup wrapper nodes outside the lock to avoid deadlock
-            for k in keys_to_cleanup:
-                self.cache._cleanup_node(k)
-            
-            # Handle extra index cleanup
+            # Handle extra index cleanup only - let Rust handle the rest
             if self._extra_index_cb:
                 if isinstance(key, tuple):
                     # Cleanup all extra index entries with matching prefix
@@ -843,7 +820,7 @@ class LruCache(Generic[KT, VT]):
                         except Exception as e:
                             logger.warning(f"Failed to cleanup extra index for key {key}: {e}")
             
-            # Use Rust del_multi method directly - handles both single keys and prefixes
+            # Use Rust del_multi method directly - handles both single keys and prefixes efficiently
             self._rust_cache.del_multi(key)
             
             if LRU_INFO:
@@ -891,20 +868,12 @@ class LruCache(Generic[KT, VT]):
             
         for key in keys:
             try:
-                # CRITICAL: Clean up wrapper node FIRST to detach from global list
-                if not self._tree and hasattr(self.cache, '_cleanup_node'):
-                    self.cache._cleanup_node(key)
-                
                 self._rust_cache.invalidate(key)
             except Exception as e:
                 logger.warning(f"Failed to invalidate key {key}: {e}")
     
     def clear(self) -> None:
         try:
-            # CRITICAL: Clear wrapper nodes first (detaches all from global list)
-            if hasattr(self.cache, 'clear'):
-                self.cache.clear()
-            
             count = self._rust_cache.clear()
             
             # Clear extra index
@@ -1182,15 +1151,9 @@ class AsyncLruCache(Generic[KT, VT]):
         This variant of `invalidate` is useful if we know that the external
         cache has already been invalidated.
         """
-        if not self._tree and hasattr(self.cache, '_cleanup_node'):
-            self.cache._cleanup_node(key)
-        
         return self._sync_rust_cache.invalidate(key)
     
     def clear(self) -> None:
-        if hasattr(self.cache, 'clear'):
-            self.cache.clear()
-        
         self._sync_rust_cache.clear()
         # Clear async cache if available
         if hasattr(self, '_async_rust_cache') and self._async_rust_cache:
@@ -1208,9 +1171,6 @@ class AsyncLruCache(Generic[KT, VT]):
             logger.info(f"🧹 AsyncCache.clear({self.cache_name}): cleared caches")
        
     async def invalidate(self, key: KT) -> None:
-        if not self._tree and hasattr(self.cache, '_cleanup_node'):
-            self.cache._cleanup_node(key)
-        
         # This method should invalidate any external cache and then invalidate the LruCache.
         return self._sync_rust_cache.invalidate(key)
     async def _await_rust_result(self, rust_result):
@@ -1228,9 +1188,6 @@ class AsyncLruCache(Generic[KT, VT]):
         if not keys:
             return
         for key in keys:
-            if not self._tree and hasattr(self.cache, '_cleanup_node'):
-                self.cache._cleanup_node(key)
-            
             self._sync_rust_cache.invalidate(key)    
     async def contains(self, key: KT) -> bool:
         return key in self._sync_rust_cache
