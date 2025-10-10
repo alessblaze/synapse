@@ -179,9 +179,10 @@ class ExpiringCache(Generic[KT, VT]):
             if hasattr(self._rust_cache, 'cache') and hasattr(self._rust_cache.cache, '_nodes'):
                 node = self._rust_cache.cache._nodes.get(key)
                 if node and node.key == key:
-                    current_reactor_time = self._clock.time_msec()
-                    age_rel = node.get_age_since_creation_relative_ms(int(current_reactor_time))
-                    return age_rel > self._expiry_ms
+                    # Use test clock time for consistency
+                    current_time_ms = int(self._clock.time_msec())
+                    age_ms = node.get_age_since_creation_ms(current_time_ms)
+                    return age_ms > self._expiry_ms
             
             # No fallback needed - Rust cache handles all time tracking
             return False
@@ -298,17 +299,19 @@ class ExpiringCache(Generic[KT, VT]):
                             creation_abs = node.get_creation_time_absolute()
                             creation_rel = node.get_creation_time()
                             age_abs = node.get_age_since_creation_ms(int(current_sys_time))
-                            age_rel = node.get_age_since_creation_relative_ms(int(current_reactor_time))
+                            current_time_ms = int(self._clock.time_msec())
+                            age_rel = node.get_age_since_creation_ms(current_time_ms)
                             
                             log_debug("Time debug - sys:%d reactor:%d rust_abs:%d rust_rel:%d age_abs:%d age_rel:%d", 
                                      current_sys_time, current_reactor_time, creation_abs, creation_rel, 
                                      age_abs, age_rel)
                         
-                        # Use Rust relative time method (works with set_with_clock)
-                        age_rel = node.get_age_since_creation_relative_ms(int(current_reactor_time))
-                        is_expired = age_rel > self._expiry_ms
+                        # Use test clock time for consistency
+                        current_time_ms = int(self._clock.time_msec())
+                        age_ms = node.get_age_since_creation_ms(current_time_ms)
+                        is_expired = age_ms > self._expiry_ms
                         
-                        log_debug("Rust expiry check: %s (age=%d > expiry=%d)", is_expired, age_rel, self._expiry_ms)
+                        log_debug("Rust expiry check: %s (age=%d > expiry=%d)", is_expired, age_ms, self._expiry_ms)
                         
                         return is_expired
                     else:
@@ -334,8 +337,10 @@ class ExpiringCache(Generic[KT, VT]):
             nodes = self._rust_cache._rust_cache.get_all_nodes()
             for node in nodes:
                 if node is not None:
-                    age_rel = node.get_age_since_creation_relative_ms(int(current_time_ms))
-                    if age_rel > self._expiry_ms:
+                    # Use test clock time for consistency
+                    current_time_ms = int(self._clock.time_msec())
+                    age_ms = node.get_age_since_creation_ms(current_time_ms)
+                    if age_ms > self._expiry_ms:
                         expired_keys.append(node.key)
         except Exception as e:
             log_debug("_prune_expired_sync failed to get nodes: %s", e)

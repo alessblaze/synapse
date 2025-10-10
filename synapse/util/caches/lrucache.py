@@ -21,6 +21,7 @@
 
 import logging
 import math
+import os
 import threading
 import weakref
 from enum import Enum
@@ -63,6 +64,10 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+# Debug flags for LRU cache eviction
+LRU_DEBUG = os.environ.get("SYNAPSE_LRU_DEBUG") == "1"
+LRU_INFO = os.environ.get("SYNAPSE_LRU_INFO") == "1"
 
 try:
     from pympler.asizeof import Asizer
@@ -140,9 +145,20 @@ def _expire_old_entries(
         node = GLOBAL_ROOT.prev_node
         assert node is not None
 
-        i = 0
-
         logger.debug("Searching for stale caches")
+        
+        # Debug counters and node counting only when needed
+        if LRU_DEBUG or LRU_INFO:
+            i = 0
+            total_nodes = 0
+            temp_node = GLOBAL_ROOT.next_node
+            while temp_node is not GLOBAL_ROOT:
+                total_nodes += 1
+                temp_node = temp_node.next_node
+            
+            logger.info(f"🔍 Global eviction starting: {total_nodes} total nodes in global list, expiry_seconds={expiry_seconds}, now={now}")
+        else:
+            i = 0  # Still need counter for eviction count
 
         evicting_due_to_memory = False
 
@@ -163,6 +179,11 @@ def _expire_old_entries(
         while node is not GLOBAL_ROOT:
             # Only the root node isn't a `_TimedListNode`.
             assert isinstance(node, _TimedListNode)
+            
+            # Debug first few nodes
+            if LRU_DEBUG:
+                if i < 5:
+                    logger.info(f"🔍 Checking node {i}: last_access={node.last_access_ts_secs}, age={now - node.last_access_ts_secs}s, threshold={expiry_seconds}s")
 
             # if node has not aged past expiry_seconds and we are not evicting due to memory usage, there's
             # nothing to do here
@@ -170,6 +191,9 @@ def _expire_old_entries(
                 node.last_access_ts_secs > now - expiry_seconds
                 and not evicting_due_to_memory
             ):
+                if LRU_DEBUG:
+                    if i < 5:
+                        logger.info(f"⏹️ Node {i} too young to evict, stopping scan")
                 break
 
             # if entry is newer than min_cache_entry_ttl then do not evict and don't evict anything newer
@@ -187,6 +211,9 @@ def _expire_old_entries(
             # list.
             assert next_node is not None
             assert cache_entry is not None
+            
+            if LRU_DEBUG:
+                logger.info(f"🗑️ Evicting cache entry: last_access={node.last_access_ts_secs}, age={now - node.last_access_ts_secs}s, type={type(cache_entry).__name__}")
             cache_entry.drop_from_cache()
 
             # Check mem allocation periodically if we are evicting a bunch of caches
@@ -223,7 +250,8 @@ def _expire_old_entries(
 
             i += 1
 
-        logger.info("Dropped %d items from caches", i)
+        if LRU_DEBUG or LRU_INFO:
+            logger.info(f"🧹 Global eviction complete: Dropped {i} items from caches (scanned {total_nodes if LRU_DEBUG or LRU_INFO else 'unknown'} total nodes)")
 
     return hs.run_as_background_process(
         "LruCache._expire_old_entries",
@@ -245,6 +273,10 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
     if hs.config.caches.expiry_time_msec:
         expiry_time = hs.config.caches.expiry_time_msec / 1000
         logger.info("Expiring LRU caches after %d seconds", expiry_time)
+        
+        # Configure Rust cache eviction with the same TTL
+        from synapse.util.caches.lrucache_compat_base import setup_rust_cache_eviction
+        setup_rust_cache_eviction(expiry_time)
     else:
         expiry_time = math.inf
 
