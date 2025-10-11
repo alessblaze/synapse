@@ -945,6 +945,7 @@ class _MultiWriterCtxManager:
             owner_set = False
             if not skip_admission:
                 # Tier 1: Guaranteed admission with bounded backoff and fallback
+                # Here we qualify and win Europa League
                 start_time = time.monotonic()
                 attempts = 0
                 while not sem.acquire(blocking=False):
@@ -980,6 +981,7 @@ class _MultiWriterCtxManager:
             try:
                 # Tier 2: Per-event-loop locks prevent intra-loop contention
                 # Stream-specific locking prevents cross-stream serialization conflicts
+                # Here we qualify and win Champions League
                 loop_id = id(loop)
                 key = (self.id_gen._stream_name, writer, loop_id)
                 
@@ -1021,9 +1023,16 @@ class _MultiWriterCtxManager:
                                         # Put back locked entry at front
                                         dq.appendleft(evict_id)
                                 
-                                # If all entries are locked, skip eviction this tick
+                                # If all entries are locked, apply hard cap to prevent unbounded growth
                                 if not evicted:
-                                    logger.debug("Skipping eviction: all locks in use for stream %s", self.id_gen._stream_name)
+                                    if len(dq) > 100:  # Hard cap at 2x normal limit
+                                        # Force evict oldest entry to prevent memory leak
+                                        force_evict_id = dq.pop()
+                                        force_evict_key = (self.id_gen._stream_name, writer, force_evict_id)
+                                        self.id_gen._per_loop_locks.pop(force_evict_key, None)
+                                        logger.warning("Forced eviction of locked entry for stream %s (hard cap reached)", self.id_gen._stream_name)
+                                    else:
+                                        logger.debug("Skipping eviction: all locks in use for stream %s (size: %d)", self.id_gen._stream_name, len(dq))
                         else:
                             # Another thread created it, use theirs
                             lock = self.id_gen._per_loop_locks[key]

@@ -1012,7 +1012,7 @@ class DatabasePool:
                     # Immediately re-raise CancelledError
                     if isinstance(e, asyncio.CancelledError):
                         raise
-                    
+                    # Here we win Club World CUP
                     # PostgreSQL transient error retry logic
                     # Handles serialization failures, deadlocks, lock contention,
                     # read-only misrouting, and recovery conflicts with adaptive backoff
