@@ -19,8 +19,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import asyncio
 import inspect
 import logging
+import random
 import time
 import types
 from collections import defaultdict
@@ -929,6 +931,16 @@ class DatabasePool:
     ) -> R:
         """Starts a transaction on the database and runs a given function
 
+        This method includes automatic retry logic for PostgreSQL transient errors:
+        - Serialization failures (SQLSTATE 40001): Bounded exponential backoff
+        - Deadlock detected (SQLSTATE 40P01): Standard exponential backoff  
+        - Lock not available (SQLSTATE 55P03): Shorter 5ms base backoff
+        - Read-only transaction errors: Standard backoff for failover scenarios
+        - Recovery conflict cancellation: Shorter 5ms backoff for WAL replay
+        
+        Retry parameters: max_retries=5, base_backoff=10ms, max_backoff=100ms
+        All retries use exponential backoff with jitter to prevent thundering herd.
+
         Arguments:
             desc: description of the transaction, for logging and metrics
             func: callback function, which will be called with a
@@ -956,49 +968,122 @@ class DatabasePool:
         """
 
         async def _runInteraction() -> R:
-            after_callbacks: List[_CallbackListEntry] = []
-            async_after_callbacks: List[_AsyncCallbackListEntry] = []
-            exception_callbacks: List[_CallbackListEntry] = []
+            max_retries = 5
+            base_backoff_ms = 10
+            max_backoff_ms = 100
+            
+            for attempt in range(max_retries):
+                after_callbacks: List[_CallbackListEntry] = []
+                async_after_callbacks: List[_AsyncCallbackListEntry] = []
+                exception_callbacks: List[_CallbackListEntry] = []
 
-            if not current_context():
-                logger.warning("Starting db txn '%s' from sentinel context", desc)
+                if not current_context():
+                    logger.warning("Starting db txn '%s' from sentinel context", desc)
 
-            try:
-                with opentracing.start_active_span(f"db.{desc}"):
-                    result: R = await self.runWithConnection(
-                        # mypy seems to have an issue with this, maybe a bug?
-                        self.new_transaction,
-                        desc,
-                        after_callbacks,
-                        async_after_callbacks,
-                        exception_callbacks,
-                        func,
-                        *args,
-                        db_autocommit=db_autocommit,
-                        isolation_level=isolation_level,
-                        **kwargs,
-                    )
+                try:
+                    with opentracing.start_active_span(f"db.{desc}"):
+                        result: R = await self.runWithConnection(
+                            # mypy seems to have an issue with this, maybe a bug?
+                            self.new_transaction,
+                            desc,
+                            after_callbacks,
+                            async_after_callbacks,
+                            exception_callbacks,
+                            func,
+                            *args,
+                            db_autocommit=db_autocommit,
+                            isolation_level=isolation_level,
+                            **kwargs,
+                        )
 
-                # We order these assuming that async functions call out to external
-                # systems (e.g. to invalidate a cache) and the sync functions make these
-                # changes on any local in-memory caches/similar, and thus must be second.
-                for async_callback, async_args, async_kwargs in async_after_callbacks:
-                    await async_callback(*async_args, **async_kwargs)
-                for after_callback, after_args, after_kwargs in after_callbacks:
-                    after_callback(*after_args, **after_kwargs)
-                return result
-            except Exception:
-                for exception_callback, after_args, after_kwargs in exception_callbacks:
-                    exception_callback(*after_args, **after_kwargs)
-                raise
+                    # We order these assuming that async functions call out to external
+                    # systems (e.g. to invalidate a cache) and the sync functions make these
+                    # changes on any local in-memory caches/similar, and thus must be second.
+                    for async_callback, async_args, async_kwargs in async_after_callbacks:
+                        await async_callback(*async_args, **async_kwargs)
+                    for after_callback, after_args, after_kwargs in after_callbacks:
+                        after_callback(*after_args, **after_kwargs)
+                    return result
+                except Exception as e:
+                    # Always run exception callbacks
+                    for exception_callback, after_args, after_kwargs in exception_callbacks:
+                        exception_callback(*after_args, **after_kwargs)
+                    
+                    # Immediately re-raise CancelledError
+                    if isinstance(e, asyncio.CancelledError):
+                        raise
+                    
+                    # PostgreSQL transient error retry logic
+                    # Handles serialization failures, deadlocks, lock contention,
+                    # read-only misrouting, and recovery conflicts with adaptive backoff
+                    should_retry = False
+                    error_type = "unknown"
+                    retry_backoff_ms = base_backoff_ms
+                    
+                    # Extract PostgreSQL error code from driver-specific attributes
+                    pgcode = None
+                    if hasattr(e, 'pgcode'):
+                        pgcode = e.pgcode
+                    elif hasattr(e, 'sqlstate'):
+                        pgcode = e.sqlstate
+                    elif hasattr(e, '__cause__') and hasattr(e.__cause__, 'pgcode'):
+                        pgcode = e.__cause__.pgcode
+                    
+                    error_msg = str(e).lower()
+                    
+                    # SQLSTATE 40001: Serialization failure - concurrent update conflicts
+                    if pgcode == '40001' or e.__class__.__name__ == 'SerializationFailure' or 'could not serialize access due to concurrent update' in error_msg:
+                        should_retry = True
+                        error_type = "serialization_failure"
+                    # SQLSTATE 40P01: Deadlock detected - transaction aborted to resolve deadlock
+                    elif pgcode == '40P01' or 'deadlock detected' in error_msg:
+                        should_retry = True
+                        error_type = "deadlock"
+                    # SQLSTATE 55P03: Lock not available - NOWAIT/try-lock patterns
+                    elif pgcode == '55P03' or 'lock not available' in error_msg:
+                        should_retry = True
+                        error_type = "lock_unavailable"
+                        retry_backoff_ms = 5  # Shorter backoff to avoid tight spinning
+                    # Read-only transaction errors during failover/misrouting
+                    elif 'cannot execute' in error_msg and 'read-only transaction' in error_msg:
+                        should_retry = True
+                        error_type = "read_only_transaction"
+                    # Query canceled due to WAL replay conflicts on standbys
+                    elif 'query canceled due to conflict with recovery' in error_msg:
+                        should_retry = True
+                        error_type = "recovery_conflict"
+                        retry_backoff_ms = 5  # Shorter backoff for recovery spikes
+                    
+                    if should_retry and attempt < max_retries - 1:
+                        # Exponential backoff with jitter
+                        backoff_ms = min(retry_backoff_ms * (2 ** attempt), max_backoff_ms)
+                        jitter_ms = random.random() * (retry_backoff_ms / 2)
+                        delay = (backoff_ms + jitter_ms) / 1000.0
+                        
+                        await asyncio.sleep(delay)
+                        logger.debug(
+                            "Retrying transaction '%s' after %s, "
+                            "attempt %d/%d, delay=%.1fms", 
+                            desc, error_type, attempt + 1, max_retries, delay * 1000
+                        )
+                        continue
+                    
+                    # Log final failure before re-raising
+                    if should_retry:
+                        logger.warning(
+                            "Transaction '%s' failed after %d retries due to %s: %s",
+                            desc, max_retries, error_type, e
+                        )
+                    else:
+                        logger.debug(
+                            "Transaction '%s' failed with non-retryable error: %s",
+                            desc, e
+                        )
+                    raise
+            
+            # This should never be reached due to the raise in the except block
+            raise RuntimeError("Unexpected end of retry loop")
 
-        # To handle cancellation, we ensure that `after_callback`s and
-        # `exception_callback`s are always run, since the transaction will complete
-        # on another thread regardless of cancellation.
-        #
-        # We also wait until everything above is done before releasing the
-        # `CancelledError`, so that logging contexts won't get used after they have been
-        # finished.
         return await delay_cancellation(_runInteraction())
 
     async def runWithConnection(

@@ -20,14 +20,18 @@
 #
 #
 import abc
+import asyncio
 import heapq
 import logging
 import threading
+import time
+from collections import deque
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
     ContextManager,
+    Deque,
     Dict,
     Generic,
     Iterable,
@@ -307,6 +311,21 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             stream_name=None,
             positive=positive,
         )
+
+        # Two-tier locking system to prevent DoS from async lock contention:
+        # Problem: Slow operations (e.g. history fetch) holding locks can cause
+        # fast operations to await indefinitely, creating cascading delays
+        # Solution: Nonblocking admission control + bounded backoff prevents
+        # async tasks from blocking the event loop waiting for locks
+        # Per-stream keying prevents unrelated streams from serializing behind hot streams
+        self._admit_sem_by_stream = {}  # Dict[Tuple[str, str], threading.Semaphore] - (stream, instance)
+        self._admit_guard = threading.Lock()
+        self._per_loop_locks = {}  # Dict[Tuple[str, str, int], asyncio.Lock] - (stream, instance, loop_id)
+        # O(1) ring buffer per stream-instance: safe eviction avoiding locked entries
+        self._per_loop_order = {}  # Dict[Tuple[str, str], Deque[int]] - (stream, instance) -> loop_ids
+        self._per_loop_guard = threading.Lock()
+        self._last_owner = {}  # Dict[Tuple[str, str], Tuple[int, int]] - (stream, instance) -> (thread, loop)
+        self._owner_set = {}  # Dict[Tuple[str, str], bool] - tracks if owner was set in async context
 
         # We check that the table and sequence haven't diverged.
         for table, _, id_column in tables:
@@ -904,11 +923,145 @@ class _MultiWriterCtxManager:
         # transactions and b) reduces the amount of time the rows are locked
         # for. If we don't do this then we'll often hit serialization errors due
         # to the fact we default to REPEATABLE READ isolation levels.
+        #
+        # Use writer lock to prevent concurrent updates to same database row
         if self.id_gen._writers:
-            await self.id_gen._db.runInteraction(
-                "MultiWriterIdGenerator._update_table",
-                self.id_gen._update_stream_positions_table_txn,
-                db_autocommit=True,
-            )
+            writer = self.id_gen._instance_name
+            loop = asyncio.get_running_loop()
+            current_owner = (threading.get_ident(), id(loop))
+            
+            # Per-stream admission control prevents cross-stream serialization
+            stream_key = (self.id_gen._stream_name, writer)
+            with self.id_gen._admit_guard:
+                sem = self.id_gen._admit_sem_by_stream.get(stream_key)
+                if sem is None:
+                    sem = threading.Semaphore(1)
+                    self.id_gen._admit_sem_by_stream[stream_key] = sem
+                
+                # Skip admission if same owner
+                skip_admission = self.id_gen._last_owner.get(stream_key) == current_owner
+            
+            acquired = False
+            owner_set = False
+            if not skip_admission:
+                # Tier 1: Guaranteed admission with bounded backoff and fallback
+                start_time = time.monotonic()
+                attempts = 0
+                while not sem.acquire(blocking=False):
+                    attempts += 1
+                    # Check wall-clock budget (3ms max)
+                    if time.monotonic() - start_time > 0.003:
+                        logger.debug("Stream position update: wall-clock budget exceeded after %d attempts", attempts)
+                        await asyncio.sleep(0)  # yield once
+                        
+                        # Guaranteed serialization: bounded retry after budget break
+                        for retry in range(5):  # Try up to 5 times
+                            if sem.acquire(timeout=0.0005):  # 500μs timeout
+                                acquired = True
+                                break
+                            await asyncio.sleep(0.001)  # 1ms between retries
+                        
+                        if not acquired:
+                            # Final fallback - must not proceed without serialization
+                            return False  # Abort to prevent concurrent DB updates
+                        break  # exit backoff loop
+                    if attempts >= 8:  # bound attempts
+                        await asyncio.sleep(0)  # yield once
+                        if not sem.acquire(blocking=False):  # final try
+                            await asyncio.sleep(0.001)  # graceful fallback
+                            continue
+                        acquired = True
+                        break
+                    await asyncio.sleep(0.0001 + (attempts * 0.00005))  # micro backoff
+                else:
+                    # Loop completed normally (sem.acquire succeeded)
+                    acquired = True
+            
+            try:
+                # Tier 2: Per-event-loop locks prevent intra-loop contention
+                # Stream-specific locking prevents cross-stream serialization conflicts
+                loop_id = id(loop)
+                key = (self.id_gen._stream_name, writer, loop_id)
+                
+                # Check if lock exists (outside asyncio context)
+                with self.id_gen._per_loop_guard:
+                    lock = self.id_gen._per_loop_locks.get(key)
+                    need_new_lock = lock is None
+                
+                # Create lock in asyncio context if needed
+                if need_new_lock:
+                    lock = asyncio.Lock()
+                    with self.id_gen._per_loop_guard:
+                        # Double-check pattern to avoid race
+                        if key not in self.id_gen._per_loop_locks:
+                            self.id_gen._per_loop_locks[key] = lock
+                            
+                            # O(1) ring buffer with safe eviction
+                            dq = self.id_gen._per_loop_order.get(stream_key)
+                            if dq is None:
+                                dq = deque()
+                                self.id_gen._per_loop_order[stream_key] = dq
+                            dq.appendleft(loop_id)
+                            
+                            # Safe eviction: only evict unlocked entries
+                            if len(dq) > 50:
+                                evicted = False
+                                # Try to find an unlocked entry to evict
+                                for _ in range(min(10, len(dq))):  # Check up to 10 entries
+                                    if not dq:  # Deque became empty
+                                        break
+                                    evict_id = dq.pop()
+                                    evict_key = (self.id_gen._stream_name, writer, evict_id)
+                                    evict_lock = self.id_gen._per_loop_locks.get(evict_key)
+                                    if evict_lock is None or not evict_lock.locked():
+                                        self.id_gen._per_loop_locks.pop(evict_key, None)
+                                        evicted = True
+                                        break
+                                    else:
+                                        # Put back locked entry at front
+                                        dq.appendleft(evict_id)
+                                
+                                # If all entries are locked, skip eviction this tick
+                                if not evicted:
+                                    logger.debug("Skipping eviction: all locks in use for stream %s", self.id_gen._stream_name)
+                        else:
+                            # Another thread created it, use theirs
+                            lock = self.id_gen._per_loop_locks[key]
+                
+                # Tier 2: use async with for asyncio lock
+                async with lock:
+                    # Update owner tracking with proper bookkeeping
+                    with self.id_gen._admit_guard:
+                        self.id_gen._last_owner[stream_key] = current_owner
+                        self.id_gen._owner_set[stream_key] = True
+                        owner_set = True
+                    
+                    # Release semaphore immediately (only if acquired)
+                    if acquired:
+                        sem.release()
+                        acquired = False
+                    
+                    # Update stream positions table
+                    await self.id_gen._db.runInteraction(
+                        "MultiWriterIdGenerator._update_table",
+                        self.id_gen._update_stream_positions_table_txn,
+                        db_autocommit=True,
+                    )
+                    
+            except Exception:
+                if acquired:
+                    sem.release()
+                # Clear owner on error only if we set it
+                if owner_set:
+                    with self.id_gen._admit_guard:
+                        self.id_gen._last_owner.pop(stream_key, None)
+                        self.id_gen._owner_set.pop(stream_key, None)
+                raise
+            finally:
+                # Clear owner after completion only if we set it
+                if owner_set:
+                    with self.id_gen._admit_guard:
+                        self.id_gen._last_owner.pop(stream_key, None)
+                        self.id_gen._owner_set.pop(stream_key, None)
 
         return False
