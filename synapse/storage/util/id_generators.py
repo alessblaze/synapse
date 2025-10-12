@@ -932,8 +932,12 @@ class _MultiWriterCtxManager:
         # Use writer lock to prevent concurrent updates to same database row
         if self.id_gen._writers:
             writer = self.id_gen._instance_name
-            loop = asyncio.get_running_loop()
-            current_owner = (threading.get_ident(), id(loop))
+            try:
+                loop = asyncio.get_running_loop()
+                current_owner = (threading.get_ident(), id(loop))
+            except RuntimeError:
+                # No asyncio loop running (SYNAPSE_ASYNC_IO_REACTOR=1 not enabled)
+                current_owner = (threading.get_ident(), 0)
             
             # Per-stream admission control prevents cross-stream serialization
             stream_key = (self.id_gen._stream_name, writer)
@@ -988,37 +992,38 @@ class _MultiWriterCtxManager:
             
             try:
                 # Tier 2: Per-event-loop asyncio locks for intra-loop optimization
-                # Validated before use to detect cross-loop corruption
-                # Falls back to admission-only mode when locks become invalid
-                loop_id = id(loop)
-                key = (self.id_gen._stream_name, writer, loop_id)
+                # Only use asyncio locks if we have an asyncio loop running
+                lock = None
+                if current_owner[1] != 0:  # We have an asyncio loop
+                    loop_id = current_owner[1]
+                    key = (self.id_gen._stream_name, writer, loop_id)
                 
-                # Check existing lock and reuse if valid for current loop
-                with self.id_gen._per_loop_guard:
-                    lock = self.id_gen._per_loop_locks.get(key)
-                    # Create new lock only if missing (key already encodes current loop_id)
-                    need_new_lock = lock is None
-                    logger.debug("🔍 Lock lookup: stream=%s, loop_id=%d, lock_id=%s, cached=%s", 
-                               self.id_gen._stream_name, loop_id, id(lock) if lock else None, not need_new_lock)
-                
-                # Create lock in asyncio context if needed
-                if need_new_lock:
-                    # Create lock outside guard to ensure correct event loop context
-                    new_lock = asyncio.Lock()
+                    # Check existing lock and reuse if valid for current loop
                     with self.id_gen._per_loop_guard:
-                        # Double-check pattern to avoid race
-                        if key not in self.id_gen._per_loop_locks:
-                            self.id_gen._per_loop_locks[key] = new_lock
-                            lock = new_lock
-                            logger.debug("🆕 Lock created: stream=%s, loop_id=%d, lock_id=%d", 
-                                       self.id_gen._stream_name, loop_id, id(lock))
+                        lock = self.id_gen._per_loop_locks.get(key)
+                        need_new_lock = lock is None
+                    
+                    # Create lock in asyncio context if needed
+                    if need_new_lock:
+                        try:
+                            new_lock = asyncio.Lock()
+                        except RuntimeError:
+                            # Failed to create asyncio lock, skip tier 2
+                            lock = None
+                            need_new_lock = False
+                        if need_new_lock and new_lock is not None:
+                            with self.id_gen._per_loop_guard:
+                                # Double-check pattern to avoid race
+                                if key not in self.id_gen._per_loop_locks:
+                                    self.id_gen._per_loop_locks[key] = new_lock
+                                    lock = new_lock
                             
-                            # Ring buffer tracks valid locks only - corrupted locks removed on detection
-                            dq = self.id_gen._per_loop_order.get(stream_key)
-                            if dq is None:
-                                dq = deque()
-                                self.id_gen._per_loop_order[stream_key] = dq
-                            dq.appendleft(loop_id)
+                                    # Ring buffer tracks valid locks only - corrupted locks removed on detection
+                                    dq = self.id_gen._per_loop_order.get(stream_key)
+                                    if dq is None:
+                                        dq = deque()
+                                        self.id_gen._per_loop_order[stream_key] = dq
+                                    dq.appendleft(loop_id)
                             
                             # Safe eviction: only evict unlocked entries
                             if len(dq) > 200:
@@ -1071,29 +1076,34 @@ class _MultiWriterCtxManager:
                                         lock = None
                                     else:
                                         logger.debug("🚶 Tail walk eviction for stream %s: reduced to %d entries", self.id_gen._stream_name, len(dq))
-                        else:
-                            # Another thread created it, use theirs
-                            lock = self.id_gen._per_loop_locks[key]
-                            logger.debug("♻️ Lock reused from race: stream=%s, loop_id=%d, lock_id=%d", 
-                                       self.id_gen._stream_name, loop_id, id(lock))
+                                else:
+                                    # Another thread created it, use theirs
+                                    lock = self.id_gen._per_loop_locks[key]
+                else:
+                    # No asyncio loop available, skip tier 2
+                    lock = None
                 
-                # Final authoritative read and validation before awaiting
-                with self.id_gen._per_loop_guard:
-                    final_lock = self.id_gen._per_loop_locks.get(key)
-                    # Validate loop identity using key instead of private _loop
-                    current_loop_id = id(asyncio.get_running_loop())
-                    if final_lock is not None and key[2] != current_loop_id:
-                        logger.warning("🔄 Loop ID mismatch: key=%d, current=%d, using admission-only", 
-                                     key[2], current_loop_id)
-                        final_lock = None
-                    # Ensure we use the authoritative lock from the map
-                    if final_lock is not lock and final_lock is not None:
-                        logger.debug("🔄 Lock changed during race, using map version: %d -> %d", 
-                                   id(lock) if lock else 0, id(final_lock))
-                    lock = final_lock
+                # Final authoritative read and validation before awaiting (only if we have asyncio)
+                if current_owner[1] != 0 and lock is not None:
+                    with self.id_gen._per_loop_guard:
+                        final_lock = self.id_gen._per_loop_locks.get(key)
+                        # Validate loop identity using key instead of private _loop
+                        try:
+                            current_loop_id = id(asyncio.get_running_loop())
+                            if final_lock is not None and key[2] != current_loop_id:
+                                logger.warning("🔄 Loop ID mismatch: key=%d, current=%d, using admission-only", 
+                                             key[2], current_loop_id)
+                                final_lock = None
+                        except RuntimeError:
+                            # No asyncio loop, skip validation
+                            final_lock = None
+                        # Ensure we use the authoritative lock from the map
+                        if final_lock is not lock and final_lock is not None:
+                            pass  # Use final_lock
+                        lock = final_lock
                 
                 # Tier 2: Use validated asyncio lock or fall back to admission-only mode
-                if lock is not None:
+                if lock is not None and current_owner[1] != 0:
                     # Validate lock is safe to use in current event loop
                     try:
                         current_loop = asyncio.get_running_loop()
@@ -1126,6 +1136,9 @@ class _MultiWriterCtxManager:
                                 dq = self.id_gen._per_loop_order.get(stream_key)
                                 if dq and loop_id in dq:
                                     dq.remove(loop_id)
+                elif current_owner[1] == 0:
+                    # No asyncio loop, skip tier 2 entirely
+                    lock = None
                     
                 if lock is not None:
                     # Mark lock as in use to prevent eviction
@@ -1172,7 +1185,7 @@ class _MultiWriterCtxManager:
                     
             except Exception as e:
                 logger.error("💥 Exception in stream position update: stream=%s, loop_id=%d, lock_id=%s, error=%s", 
-                           self.id_gen._stream_name, loop_id, id(lock) if lock else None, e)
+                           self.id_gen._stream_name, current_owner[1], id(lock) if lock else None, e)
                 if acquired:
                     sem.release()
                     acquired = False
