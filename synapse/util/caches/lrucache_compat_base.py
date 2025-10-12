@@ -1200,8 +1200,7 @@ class AsyncLruCache(Generic[KT, VT]):
             self.max_size = new_size
             try:
                 self._sync_rust_cache.resize(new_size)
-                if self._async_rust_cache:
-                    self._async_rust_cache.resize(new_size)
+                # AsyncRustLruCache doesn't support resize - only sync cache needs resizing
                 logger.info(f"🔄 AsyncCache {self.cache_name} resized to {new_size}")
             except Exception as e:
                 logger.error(f"❌ Failed to resize async cache {self.cache_name}: {e}")

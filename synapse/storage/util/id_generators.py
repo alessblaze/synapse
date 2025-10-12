@@ -20,18 +20,14 @@
 #
 #
 import abc
-import asyncio
 import heapq
 import logging
 import threading
-import time
-from collections import deque
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
     ContextManager,
-    Deque,
     Dict,
     Generic,
     Iterable,
@@ -311,24 +307,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             stream_name=None,
             positive=positive,
         )
-
-        # Two-tier locking system with admission-only fallback:
-        # Tier 1: threading.Semaphore - cross-loop serialization (always safe)
-        # Tier 2: asyncio.Lock - intra-loop optimization (validated before use)
-        # Fallback: Admission-only mode when asyncio locks become corrupted
-        # 
-        # Lock validation detects cross-loop corruption (user refreshes) and
-        # removes invalid entries from ring buffer to prevent accumulation
-        self._admit_sem_by_stream = {}  # Dict[Tuple[str, str], threading.Semaphore] - (stream, instance)
-        self._admit_guard = threading.Lock()
-        self._per_loop_locks = {}  # Dict[Tuple[str, str, int], asyncio.Lock] - (stream, instance, loop_id)
-        # O(1) ring buffer per stream-instance: safe eviction avoiding locked entries
-        self._per_loop_order = {}  # Dict[Tuple[str, str], Deque[int]] - (stream, instance) -> loop_ids
-        self._per_loop_guard = threading.Lock()
-        self._last_owner = {}  # Dict[Tuple[str, str], Tuple[int, int]] - (stream, instance) -> (thread, loop)
-        self._owner_set = {}  # Dict[Tuple[str, str], bool] - tracks if owner was set in async context
-        self._saturation_clears = 0  # Counter for clears due to saturation
-        self._in_use = {}  # Dict[Tuple[str, str, int], bool] - tracks locks in use to prevent eviction
 
         # We check that the table and sequence haven't diverged.
         for table, _, id_column in tables:
@@ -926,288 +904,11 @@ class _MultiWriterCtxManager:
         # transactions and b) reduces the amount of time the rows are locked
         # for. If we don't do this then we'll often hit serialization errors due
         # to the fact we default to REPEATABLE READ isolation levels.
-        # This is overengineered, but it may save 100ms on a db fallback when serialization
-        # errors occur. Completely unneccessary but works.
-        # the emojis are used only for the log to be visible easily.
-        # Use writer lock to prevent concurrent updates to same database row
         if self.id_gen._writers:
-            writer = self.id_gen._instance_name
-            try:
-                loop = asyncio.get_running_loop()
-                current_owner = (threading.get_ident(), id(loop))
-            except RuntimeError:
-                # No asyncio loop running (SYNAPSE_ASYNC_IO_REACTOR=1 not enabled)
-                current_owner = (threading.get_ident(), 0)
-            
-            # Per-stream admission control prevents cross-stream serialization
-            stream_key = (self.id_gen._stream_name, writer)
-            with self.id_gen._admit_guard:
-                sem = self.id_gen._admit_sem_by_stream.get(stream_key)
-                if sem is None:
-                    sem = threading.Semaphore(1)
-                    self.id_gen._admit_sem_by_stream[stream_key] = sem
-                
-                # Check if force admission is needed (after saturation clear)
-                force_admission = stream_key not in self.id_gen._last_owner
-                # Skip admission if same owner and no force needed
-                skip_admission = (not force_admission and 
-                                self.id_gen._last_owner.get(stream_key) == current_owner)
-            
-            acquired = False
-            owner_set = False
-            if not skip_admission:
-                # Tier 1: Threading semaphore admission control with bounded backoff
-                # Provides cross-loop serialization that works reliably in Twisted
-                start_time = time.monotonic()
-                attempts = 0
-                while not sem.acquire(blocking=False):
-                    attempts += 1
-                    # Check wall-clock budget (3ms max)
-                    if time.monotonic() - start_time > 0.003:
-                        logger.debug("⏰ Stream position update: wall-clock budget exceeded after %d attempts", attempts)
-                        await asyncio.sleep(0)  # yield once
-                        
-                        # Guaranteed serialization: bounded retry after budget break
-                        for retry in range(5):  # Try up to 5 times
-                            if sem.acquire(timeout=0.0005):  # 500μs timeout
-                                acquired = True
-                                break
-                            await asyncio.sleep(0.001)  # 1ms between retries
-                        
-                        if not acquired:
-                            # Final fallback - must not proceed without serialization
-                            return False  # Abort to prevent concurrent DB updates
-                        break  # exit backoff loop
-                    if attempts >= 8:  # bound attempts
-                        await asyncio.sleep(0)  # yield once
-                        if not sem.acquire(blocking=False):  # final try
-                            await asyncio.sleep(0.001)  # graceful fallback
-                            continue
-                        acquired = True
-                        break
-                    try:
-                        await asyncio.sleep(0.0001 + (attempts * 0.00005))  # micro backoff
-                    except RuntimeError:
-                        # No asyncio loop, use blocking sleep
-                        time.sleep(0.0001 + (attempts * 0.00005))
-                else:
-                    # Loop completed normally (sem.acquire succeeded)
-                    acquired = True
-            
-            try:
-                # Tier 2: Per-event-loop asyncio locks for intra-loop optimization
-                # Only use asyncio locks if we have an asyncio loop running
-                lock = None
-                if current_owner[1] != 0:  # We have an asyncio loop
-                    loop_id = current_owner[1]
-                    key = (self.id_gen._stream_name, writer, loop_id)
-                
-                    # Check existing lock and reuse if valid for current loop
-                    with self.id_gen._per_loop_guard:
-                        lock = self.id_gen._per_loop_locks.get(key)
-                        need_new_lock = lock is None
-                    
-                    # Create lock in asyncio context if needed
-                    if need_new_lock:
-                        try:
-                            new_lock = asyncio.Lock()
-                        except RuntimeError:
-                            # Failed to create asyncio lock, skip tier 2
-                            lock = None
-                            need_new_lock = False
-                        if need_new_lock and new_lock is not None:
-                            with self.id_gen._per_loop_guard:
-                                # Double-check pattern to avoid race
-                                if key not in self.id_gen._per_loop_locks:
-                                    self.id_gen._per_loop_locks[key] = new_lock
-                                    lock = new_lock
-                            
-                                    # Ring buffer tracks valid locks only - corrupted locks removed on detection
-                                    dq = self.id_gen._per_loop_order.get(stream_key)
-                                    if dq is None:
-                                        dq = deque()
-                                        self.id_gen._per_loop_order[stream_key] = dq
-                                    dq.appendleft(loop_id)
-                            
-                            # Safe eviction: only evict unlocked entries
-                            if len(dq) > 200:
-                                evicted = False
-                                # Try to find an unlocked entry to evict
-                                for _ in range(min(100, len(dq))):  # Check up to 100 entries
-                                    if not dq:  # Deque became empty
-                                        break
-                                    evict_id = dq.pop()
-                                    evict_key = (self.id_gen._stream_name, writer, evict_id)
-                                    evict_lock = self.id_gen._per_loop_locks.get(evict_key)
-                                    # Skip eviction if lock is in use or locked
-                                    if (evict_lock is None or 
-                                        (not evict_lock.locked() and not self.id_gen._in_use.get(evict_key, False))):
-                                        self.id_gen._per_loop_locks.pop(evict_key, None)
-                                        evicted = True
-                                        break
-                                    else:
-                                        # Put back locked entry at front
-                                        dq.appendleft(evict_id)
-                                
-                                # If all entries are locked, evict from tail until hitting locked entry
-                                if not evicted and len(dq) > 500:  # Hard cap at 2.5x normal limit
-                                    # Tail walk: evict unlocked entries from oldest until we hit a locked one
-                                    while len(dq) > 200 and dq:  # Reduce to normal limit
-                                        tail_id = dq.pop()
-                                        tail_key = (self.id_gen._stream_name, writer, tail_id)
-                                        tail_lock = self.id_gen._per_loop_locks.get(tail_key)
-                                        # Skip eviction if lock is in use or locked
-                                        if (tail_lock is None or 
-                                            (not tail_lock.locked() and not self.id_gen._in_use.get(tail_key, False))):
-                                            self.id_gen._per_loop_locks.pop(tail_key, None)
-                                        else:
-                                            # Hit locked or in-use entry, put it back and stop
-                                            dq.append(tail_id)
-                                            break
-                                    
-                                    # If still overflown after tail walk, clear all and let retry handle it
-                                    if len(dq) > 500:
-                                        self.id_gen._saturation_clears += 1
-                                        self.id_gen._per_loop_locks.clear()
-                                        self.id_gen._per_loop_order.clear()
-                                        self.id_gen._in_use.clear()
-                                        # Reset owner tracking to force fresh semaphore acquisition
-                                        self.id_gen._last_owner.clear()
-                                        self.id_gen._owner_set.clear()
-                                        logger.warning("🚨 Cleared lock buffers for stream %s due to saturation (clear #%d) - consider increasing caps", 
-                                                     self.id_gen._stream_name, self.id_gen._saturation_clears)
-                                        # Skip creating new lock, proceed under admission only
-                                        lock = None
-                                    else:
-                                        logger.debug("🚶 Tail walk eviction for stream %s: reduced to %d entries", self.id_gen._stream_name, len(dq))
-                                else:
-                                    # Another thread created it, use theirs
-                                    lock = self.id_gen._per_loop_locks[key]
-                else:
-                    # No asyncio loop available, skip tier 2
-                    lock = None
-                
-                # Final authoritative read and validation before awaiting (only if we have asyncio)
-                if current_owner[1] != 0 and lock is not None:
-                    with self.id_gen._per_loop_guard:
-                        final_lock = self.id_gen._per_loop_locks.get(key)
-                        # Validate loop identity using key instead of private _loop
-                        try:
-                            current_loop_id = id(asyncio.get_running_loop())
-                            if final_lock is not None and key[2] != current_loop_id:
-                                logger.warning("🔄 Loop ID mismatch: key=%d, current=%d, using admission-only", 
-                                             key[2], current_loop_id)
-                                final_lock = None
-                        except RuntimeError:
-                            # No asyncio loop, skip validation
-                            final_lock = None
-                        # Ensure we use the authoritative lock from the map
-                        if final_lock is not lock and final_lock is not None:
-                            pass  # Use final_lock
-                        lock = final_lock
-                
-                # Tier 2: Use validated asyncio lock or fall back to admission-only mode
-                if lock is not None and current_owner[1] != 0:
-                    # Validate lock is safe to use in current event loop
-                    try:
-                        current_loop = asyncio.get_running_loop()
-                        # Check if lock belongs to current loop
-                        if hasattr(lock, '_loop') and lock._loop is not current_loop:
-                            logger.warning("🔧 Lock from different loop, using admission-only")
-                            lock = None
-                            # Only remove from cache if safe - avoid disrupting waiters
-                            with self.id_gen._per_loop_guard:
-                                cached_lock = self.id_gen._per_loop_locks.get(key)
-                                if (cached_lock and not cached_lock.locked() and 
-                                    not self.id_gen._in_use.get(key, False)):
-                                    self.id_gen._per_loop_locks.pop(key, None)
-                                    dq = self.id_gen._per_loop_order.get(stream_key)
-                                    if dq and loop_id in dq:
-                                        dq.remove(loop_id)
-                        # Test acquire/release to ensure lock is functional
-                        elif lock.acquire_nowait():
-                            lock.release()
-                        # If acquire_nowait() returns False, lock is held by someone else (OK)
-                    except Exception as e:
-                        logger.warning("🔧 Lock validation failed: %s, using admission-only", e)
-                        lock = None
-                        # Only remove from cache if safe - avoid disrupting waiters
-                        with self.id_gen._per_loop_guard:
-                            cached_lock = self.id_gen._per_loop_locks.get(key)
-                            if (cached_lock and not cached_lock.locked() and 
-                                not self.id_gen._in_use.get(key, False)):
-                                self.id_gen._per_loop_locks.pop(key, None)
-                                dq = self.id_gen._per_loop_order.get(stream_key)
-                                if dq and loop_id in dq:
-                                    dq.remove(loop_id)
-                elif current_owner[1] == 0:
-                    # No asyncio loop, skip tier 2 entirely
-                    lock = None
-                    
-                if lock is not None:
-                    # Mark lock as in use to prevent eviction
-                    with self.id_gen._per_loop_guard:
-                        self.id_gen._in_use[key] = True
-                    try:
-                        async with lock:
-                            # Update owner tracking with proper bookkeeping
-                            with self.id_gen._admit_guard:
-                                self.id_gen._last_owner[stream_key] = current_owner
-                                self.id_gen._owner_set[stream_key] = True
-                                owner_set = True
-                            
-                            # Update stream positions table (keep semaphore held for cross-loop serialization)
-                            await self.id_gen._db.runInteraction(
-                                "MultiWriterIdGenerator._update_table",
-                                self.id_gen._update_stream_positions_table_txn,
-                                db_autocommit=True,
-                            )
-                            
-                            # Release semaphore after DB operation completes
-                            if acquired:
-                                sem.release()
-                                acquired = False
-                    finally:
-                        # Clear in_use flag
-                        with self.id_gen._per_loop_guard:
-                            self.id_gen._in_use.pop(key, None)
-                
-                if lock is None:
-                    # Admission-only mode: Use semaphore without asyncio lock optimization
-                    # Update owner tracking with proper bookkeeping
-                    with self.id_gen._admit_guard:
-                        self.id_gen._last_owner[stream_key] = current_owner
-                        self.id_gen._owner_set[stream_key] = True
-                        owner_set = True
-                    
-                    # Update stream positions table (keep semaphore held for cross-loop serialization)
-                    await self.id_gen._db.runInteraction(
-                        "MultiWriterIdGenerator._update_table",
-                        self.id_gen._update_stream_positions_table_txn,
-                        db_autocommit=True,
-                    )
-                    
-            except Exception as e:
-                logger.error("💥 Exception in stream position update: stream=%s, loop_id=%d, lock_id=%s, error=%s", 
-                           self.id_gen._stream_name, current_owner[1], id(lock) if lock else None, e)
-                if acquired:
-                    sem.release()
-                    acquired = False
-                # Clear owner on error only if we set it
-                if owner_set:
-                    with self.id_gen._admit_guard:
-                        self.id_gen._last_owner.pop(stream_key, None)
-                        self.id_gen._owner_set.pop(stream_key, None)
-                    owner_set = False
-                raise
-            finally:
-                # Release semaphore if still held
-                if acquired:
-                    sem.release()
-                # Clear owner after completion only if we set it
-                if owner_set:
-                    with self.id_gen._admit_guard:
-                        self.id_gen._last_owner.pop(stream_key, None)
-                        self.id_gen._owner_set.pop(stream_key, None)
+            await self.id_gen._db.runInteraction(
+                "MultiWriterIdGenerator._update_table",
+                self.id_gen._update_stream_positions_table_txn,
+                db_autocommit=True,
+            )
 
         return False
