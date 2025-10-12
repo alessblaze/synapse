@@ -985,7 +985,11 @@ class _MultiWriterCtxManager:
                             continue
                         acquired = True
                         break
-                    await asyncio.sleep(0.0001 + (attempts * 0.00005))  # micro backoff
+                    try:
+                        await asyncio.sleep(0.0001 + (attempts * 0.00005))  # micro backoff
+                    except RuntimeError:
+                        # No asyncio loop, use blocking sleep
+                        time.sleep(0.0001 + (attempts * 0.00005))
                 else:
                     # Loop completed normally (sem.acquire succeeded)
                     acquired = True
