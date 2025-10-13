@@ -41,13 +41,33 @@ class TracerConfig(Config):
             "jaeger_config",
             {"sampler": {"type": "const", "param": 1}, "logging": False},
         )
+        
+        # OTLP endpoint for OpenTelemetry
+        self.otlp_endpoint = opentracing_config.get(
+            "otlp_endpoint", "http://localhost:4318/v1/traces"
+        )
+        
+        # Sampling ratio for OpenTelemetry (0.0 to 1.0)
+        self.sampling_ratio = opentracing_config.get("sampling_ratio", 1.0)
+        if not isinstance(self.sampling_ratio, (int, float)) or not (0.0 <= self.sampling_ratio <= 1.0):
+            raise ConfigError("sampling_ratio must be a number between 0.0 and 1.0")
 
         self.force_tracing_for_users: Set[str] = set()
 
         if not self.opentracer_enabled:
             return
 
-        check_requirements("opentracing")
+        # Check for OpenTelemetry dependencies instead of jaeger-client
+        try:
+            from opentelemetry import trace as otel_trace
+            import opentelemetry.exporter.otlp.proto.http.trace_exporter
+            import opentelemetry.shim.opentracing_shim
+            import opentelemetry.sdk.resources
+        except ImportError as e:
+            raise ConfigError(
+                f"The server has been configured to use opentracing but required "
+                f"OpenTelemetry packages are not installed: {e}"
+            )
 
         # The tracer is enabled so sanitize the config
 

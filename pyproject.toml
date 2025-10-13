@@ -254,8 +254,6 @@ authlib = { version = ">=0.15.1", optional = true }
 systemd-python = { version = ">=231", optional = true }
 lxml = { version = ">=4.5.2", optional = true }
 sentry-sdk = { version = ">=0.7.2", optional = true }
-opentracing = { version = ">=2.2.0", optional = true }
-jaeger-client = { version = ">=4.0.0", optional = true }
 txredisapi = { version = ">=1.4.7", optional = true }
 hiredis = { version = "*", optional = true }
 Pympler = { version = "*", optional = true }
@@ -264,7 +262,10 @@ idna = { version = ">=2.5", optional = true }
 pytest = "^8.4.2"
 pyperf = "^2.9.0"
 psycopg2-binary = "^2.9.10"
-matrices-evolved = "^1.0.9"
+opentelemetry-api = "^1.37.0"
+opentelemetry-sdk = "^1.37.0"
+opentelemetry-exporter-otlp-proto-http = "^1.37.0"
+opentelemetry-opentracing-shim = "^0.58b0"
 
 [tool.poetry.extras]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified

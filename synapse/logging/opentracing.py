@@ -257,47 +257,99 @@ except ImportError:
     opentracing = None  # type: ignore[assignment]
     tags = _DummyTagNames  # type: ignore[assignment]
 try:
-    from jaeger_client import Config as JaegerConfig
+    from opentelemetry import trace as otel_trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.shim.opentracing_shim import create_tracer
 
     from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
-    JaegerConfig = None  # type: ignore
+    otel_trace = None  # type: ignore
+    OTLPSpanExporter = None  # type: ignore
+    TracerProvider = None  # type: ignore
+    BatchSpanProcessor = None  # type: ignore
+    Resource = None  # type: ignore
+    create_tracer = None  # type: ignore
     LogContextScopeManager = None  # type: ignore
 
 
-try:
-    from rust_python_jaeger_reporter import Reporter
-
-    # jaeger-client 4.7.0 requires that reporters inherit from BaseReporter, which
-    # didn't exist before that version.
-    try:
-        from jaeger_client.reporter import BaseReporter
-    except ImportError:
-
-        class BaseReporter:  # type: ignore[no-redef]
-            pass
-
-    @attr.s(slots=True, frozen=True, auto_attribs=True)
-    class _WrappedRustReporter(BaseReporter):
-        """Wrap the reporter to ensure `report_span` never throws."""
-
-        _reporter: Reporter = attr.Factory(Reporter)
-
-        def set_process(self, *args: Any, **kwargs: Any) -> None:
-            return self._reporter.set_process(*args, **kwargs)
-
-        def report_span(self, span: "opentracing.Span") -> None:
-            try:
-                return self._reporter.report_span(span)
-            except Exception:
-                logger.exception("Failed to report span")
-
-    RustReporter: Optional[Type[_WrappedRustReporter]] = _WrappedRustReporter
-except ImportError:
-    RustReporter = None
+# RustReporter removed - using OpenTelemetry OTLP exporter instead
 
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_value(value: Any) -> Any:
+    """Sanitize values for OpenTelemetry compatibility.
+    
+    Returns None if the value should be skipped entirely.
+    """
+    ALLOWED = (str, bool, int, float, bytes)
+    
+    # Drop None outright
+    if value is None:
+        return None
+    # Primitives pass through
+    if isinstance(value, ALLOWED):
+        return value
+    # Normalize sequences: drop None and coerce non-primitives
+    if isinstance(value, (list, tuple)):
+        cleaned = [x for x in value if x is not None]
+        if not cleaned:
+            return None
+        # Enforce homogeneous arrays: if mixed primitive types, coerce all to str
+        prim_types = {type(x) for x in cleaned if isinstance(x, ALLOWED)}
+        if len(prim_types) > 1:
+            return [str(x) for x in cleaned]
+        return [x if isinstance(x, ALLOWED) else str(x) for x in cleaned]
+    # Fallback: stringify custom objects
+    return str(value)
+
+
+def _patch_shim_span_methods() -> None:
+    """Monkey-patch OpenTracing shim span methods to sanitize values."""
+    if not opentracing:
+        return
+        
+    # Create a temporary span to discover the shim span class
+    scope = opentracing.tracer.start_active_span("_shim_probe")
+    span_cls = type(scope.span)
+    scope.close()
+    
+    # Make patch idempotent - avoid double-wrapping on reloads
+    if hasattr(span_cls, '_otel_sanitized'):
+        return
+    span_cls._otel_sanitized = True
+    
+    # Patch set_tag method
+    old_set_tag = span_cls.set_tag
+    def new_set_tag(self, key, value):
+        try:
+            safe = _sanitize_value(value)
+            if safe is None:
+                logger.debug("Skipping tag %s=None", key)
+                return self  # Preserve chaining
+            return old_set_tag(self, key, safe)
+        except Exception as e:
+            logger.debug("Sanitizer failed for tag %s: %s, falling back", key, e)
+            return old_set_tag(self, key, value)
+    span_cls.set_tag = new_set_tag
+    
+    # Patch log_kv method
+    old_log_kv = span_cls.log_kv
+    def new_log_kv(self, key_values, timestamp=None):
+        try:
+            safe = {k: v for k, v in ((k, _sanitize_value(v)) for k, v in key_values.items()) if v is not None}
+            if not safe:
+                logger.debug("Skipping log_kv - no valid key-value pairs")
+                return None  # OpenTracing log_kv returns None
+            return old_log_kv(self, safe, timestamp)
+        except Exception as e:
+            logger.debug("Sanitizer failed for log_kv: %s, falling back", e)
+            return old_log_kv(self, key_values, timestamp)
+    span_cls.log_kv = new_log_kv
 
 
 class SynapseTags:
@@ -445,25 +497,20 @@ def ensure_active_span(
 
 
 def init_tracer(hs: "HomeServer") -> None:
-    """Set the whitelists and initialise the JaegerClient tracer"""
+    """Set the whitelists and initialise the OpenTelemetry tracer with OTLP exporter"""
     global opentracing
     if not hs.config.tracing.opentracer_enabled:
         # We don't have a tracer
         opentracing = None  # type: ignore[assignment]
         return
 
-    if opentracing is None or JaegerConfig is None:
+    if opentracing is None or TracerProvider is None:
         raise ConfigError(
-            "The server has been configured to use opentracing but opentracing is not "
+            "The server has been configured to use opentracing but opentelemetry is not "
             "installed."
         )
 
-    # Pull out the jaeger config if it was given. Otherwise set it to something sensible.
-    # See https://github.com/jaegertracing/jaeger-client-python/blob/master/jaeger_client/config.py
-
     set_homeserver_whitelist(hs.config.tracing.opentracer_whitelist)
-
-    from jaeger_client.metrics.prometheus import PrometheusMetricsFactory
 
     # Instance names are opaque strings but by stripping off the number suffix,
     # we can get something that looks like a "worker type", e.g.
@@ -473,29 +520,25 @@ def init_tracer(hs: "HomeServer") -> None:
         STRIP_INSTANCE_NUMBER_SUFFIX_REGEX, "", hs.get_instance_name()
     )
 
-    jaeger_config = hs.config.tracing.jaeger_config
-    tags = jaeger_config.setdefault("tags", {})
+    # Define service resource so Jaeger groups spans under a service
+    service_name = f"{hs.config.server.server_name} {instance_name_by_type}"
+    resource = Resource(attributes={"service.name": service_name})
 
-    # tag the Synapse instance name so that it's an easy jumping
-    # off point into the logs. Can also be used to filter for an
-    # instance that is under load.
-    tags[SynapseTags.INSTANCE_NAME] = hs.get_instance_name()
-
-    config = JaegerConfig(
-        config=jaeger_config,
-        service_name=f"{hs.config.server.server_name} {instance_name_by_type}",
-        scope_manager=LogContextScopeManager(),
-        metrics_factory=PrometheusMetricsFactory(),
-    )
-
-    # If we have the rust jaeger reporter available let's use that.
-    if RustReporter:
-        logger.info("Using rust_python_jaeger_reporter library")
-        assert config.sampler is not None
-        tracer = config.create_tracer(RustReporter(), config.sampler)
-        opentracing.set_global_tracer(tracer)
-    else:
-        config.initialize_tracer()
+    # Set up OpenTelemetry with OTLP exporter
+    otel_trace.set_tracer_provider(TracerProvider(resource=resource))
+    exporter = OTLPSpanExporter(endpoint=hs.config.tracing.otlp_endpoint)
+    otel_trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(exporter))
+    
+    # Create OpenTracing-compatible tracer using the bridge
+    opentracing_tracer = create_tracer(otel_trace.get_tracer_provider())
+    
+    # Set the global OpenTracing tracer
+    opentracing.set_global_tracer(opentracing_tracer)
+    
+    # Monkey-patch the shim span methods to sanitize values for OpenTelemetry
+    _patch_shim_span_methods()
+    
+    logger.info("OpenTelemetry tracer initialized with OTLP exporter")
 
 
 # Whitelisting
@@ -1070,7 +1113,7 @@ def tag_args(func: Callable[P, R]) -> Callable[P, R]:
                 # and this is good enough.
                 continue
 
-            set_tag(SynapseTags.FUNC_ARG_PREFIX + argspec.args[i], str(arg))
+            set_tag(SynapseTags.FUNC_ARG_PREFIX + argspec.args[i], arg)
         set_tag(SynapseTags.FUNC_ARGS, str(args[len(argspec.args) :]))
         set_tag(SynapseTags.FUNC_KWARGS, str(kwargs))
         yield
