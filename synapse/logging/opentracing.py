@@ -3,7 +3,7 @@
 #
 # Copyright 2019 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
-#
+# Copyright 2025 Aless Microsystems
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
 # published by the Free Software Foundation, either version 3 of the
@@ -261,6 +261,7 @@ try:
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.sdk.trace.sampling import TraceIdRatioBased, ALWAYS_ON, ALWAYS_OFF
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.shim.opentracing_shim import create_tracer
 
@@ -286,7 +287,7 @@ def _sanitize_value(value: Any) -> Any:
     
     Returns None if the value should be skipped entirely.
     """
-    ALLOWED = (str, bool, int, float, bytes)
+    ALLOWED = (str, bool, int, float)
     
     # Drop None outright
     if value is None:
@@ -294,6 +295,9 @@ def _sanitize_value(value: Any) -> Any:
     # Primitives pass through
     if isinstance(value, ALLOWED):
         return value
+    # Convert bytes to str for OTLP compatibility
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace')
     # Normalize sequences: drop None and coerce non-primitives
     if isinstance(value, (list, tuple)):
         cleaned = [x for x in value if x is not None]
@@ -303,7 +307,7 @@ def _sanitize_value(value: Any) -> Any:
         prim_types = {type(x) for x in cleaned if isinstance(x, ALLOWED)}
         if len(prim_types) > 1:
             return [str(x) for x in cleaned]
-        return [x if isinstance(x, ALLOWED) else str(x) for x in cleaned]
+        return [x if isinstance(x, ALLOWED) else (x.decode('utf-8', errors='replace') if isinstance(x, bytes) else str(x)) for x in cleaned]
     # Fallback: stringify custom objects
     return str(value)
 
@@ -522,12 +526,40 @@ def init_tracer(hs: "HomeServer") -> None:
 
     # Define service resource so Jaeger groups spans under a service
     service_name = f"{hs.config.server.server_name} {instance_name_by_type}"
-    resource = Resource(attributes={"service.name": service_name})
+    resource_attrs = {"service.name": service_name}
+    
+    # Sanitize resource attributes to prevent non-primitive values
+    sanitized_resource_attrs = {k: safe_v for k, v in hs.config.tracing.resource_attributes.items() if (safe_v := _sanitize_value(v)) is not None}
+    resource_attrs.update(sanitized_resource_attrs)
+    
+    resource = Resource(attributes=resource_attrs)
+    
+    # Enable OpenTelemetry logging if requested
+    if hs.config.tracing.otel_logging_enabled:
+        import logging as py_logging
+        py_logging.getLogger("opentelemetry").setLevel(py_logging.DEBUG)
+        py_logging.getLogger("opentelemetry.exporter.otlp").setLevel(py_logging.DEBUG)
 
-    # Set up OpenTelemetry with OTLP exporter
-    otel_trace.set_tracer_provider(TracerProvider(resource=resource))
+    # Set up OpenTelemetry with OTLP exporter and sampling
+    if hs.config.tracing.sampler_type == "always_on":
+        sampler = ALWAYS_ON
+    elif hs.config.tracing.sampler_type == "always_off":
+        sampler = ALWAYS_OFF
+    else:  # ratio (default)
+        sampler = TraceIdRatioBased(hs.config.tracing.sampling_ratio)
+    
+    otel_trace.set_tracer_provider(TracerProvider(resource=resource, sampler=sampler))
     exporter = OTLPSpanExporter(endpoint=hs.config.tracing.otlp_endpoint)
-    otel_trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(exporter))
+    
+    # Configure batch processor with custom settings
+    batch_processor = BatchSpanProcessor(
+        exporter,
+        max_export_batch_size=hs.config.tracing.batch_max_export_batch_size,
+        export_timeout_millis=hs.config.tracing.batch_export_timeout_millis,
+        schedule_delay_millis=hs.config.tracing.batch_schedule_delay_millis,
+        max_queue_size=hs.config.tracing.batch_max_queue_size,
+    )
+    otel_trace.get_tracer_provider().add_span_processor(batch_processor)
     
     # Create OpenTracing-compatible tracer using the bridge
     opentracing_tracer = create_tracer(otel_trace.get_tracer_provider())
@@ -605,11 +637,18 @@ def start_active_span(
         # use the global tracer by default
         tracer = opentracing.tracer
 
+    # Sanitize tags dict to avoid type errors at span start
+    sanitized_tags = None
+    if tags:
+        sanitized_tags = {k: safe_v for k, v in tags.items() if (safe_v := _sanitize_value(v)) is not None}
+        if not sanitized_tags:
+            sanitized_tags = None
+
     return tracer.start_active_span(
         operation_name,
         child_of=child_of,
         references=references,
-        tags=tags,
+        tags=sanitized_tags,
         start_time=start_time,
         ignore_active_span=ignore_active_span,
         finish_on_close=finish_on_close,
@@ -711,11 +750,18 @@ def start_active_span_from_edu(
 
     references += _references
 
+    # Sanitize tags dict to avoid type errors at span start
+    sanitized_tags = None
+    if tags:
+        sanitized_tags = {k: safe_v for k, v in tags.items() if (safe_v := _sanitize_value(v)) is not None}
+        if not sanitized_tags:
+            sanitized_tags = None
+
     scope = opentracing.tracer.start_active_span(
         operation_name,
         child_of=context,
         references=references,
-        tags=tags,
+        tags=sanitized_tags,
         start_time=start_time,
         ignore_active_span=ignore_active_span,
         finish_on_close=finish_on_close,
@@ -770,6 +816,10 @@ def force_tracing(
     span: Union["opentracing.Span", _Sentinel] = _Sentinel.sentinel,
 ) -> None:
     """Force sampling for the active/given span and its children.
+
+    Note: With OpenTelemetry, this only sets tags and baggage on the span but does not
+    affect the SDK's sampling decision after the span has started. The sampling decision
+    is made at span creation time and cannot be changed afterward.
 
     Args:
         span: span to force tracing for. By default, the active span.
@@ -851,6 +901,12 @@ def inject_response_headers(response_headers: Headers) -> None:
     if not span:
         return
 
+    # Inject W3C traceparent for cross-service correlation
+    carrier: Dict[str, str] = {}
+    opentracing.tracer.inject(span.context, opentracing.Format.HTTP_HEADERS, carrier)
+    for key, value in carrier.items():
+        response_headers.addRawHeader(key, value)
+
     # This is a bit implementation-specific.
     #
     # Jaeger's Spans have a trace_id property; other implementations (including the
@@ -896,7 +952,7 @@ def get_active_span_text_map(destination: Optional[str] = None) -> Dict[str, str
     return carrier
 
 
-@ensure_active_span("get the span context as a string.", ret={})
+@ensure_active_span("get the span context as a string.", ret="")
 def active_span_context_as_string() -> str:
     """
     Returns:
@@ -1011,11 +1067,13 @@ def _custom_sync_async_decorator(
                         scope.__exit__(None, None, None)
                         return result
 
-                    def err_back(result: R) -> R:
-                        # TODO: Pass the error details into `scope.__exit__(...)` for
-                        #       consistency with the other paths.
-                        scope.__exit__(None, None, None)
-                        return result
+                    def err_back(failure):
+                        # Extract exception info from Twisted Failure for proper error handling
+                        exc_type = failure.type if hasattr(failure, 'type') else type(failure.value)
+                        exc_value = failure.value if hasattr(failure, 'value') else failure
+                        exc_tb = failure.tb if hasattr(failure, 'tb') else None
+                        scope.__exit__(exc_type, exc_value, exc_tb)
+                        return failure
 
                     result.addCallbacks(call_back, err_back)
 

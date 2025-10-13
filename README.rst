@@ -230,6 +230,58 @@ To reiterate: the Identity server will only be used if you choose to associate
 an email address with your account, or send an invite to another user via their
 email address.
 
+🔍 OpenTelemetry Tracing
+========================
+
+Synapse supports distributed tracing using OpenTelemetry with OTLP export. This allows you to
+trace requests across your Matrix infrastructure and export traces to observability platforms
+like Jaeger, Zipkin, or cloud-native solutions.
+
+To enable OpenTelemetry tracing, add the following to your ``homeserver.yaml``:
+
+.. code-block:: yaml
+
+    # OpenTelemetry configuration
+    opentelemetry:
+      enabled: true
+      otlp_endpoint: "http://localhost:4318/v1/traces"  # OTLP HTTP endpoint
+      sampler:
+        type: ratio              # ratio, always_on, always_off
+        ratio: 0.1              # For ratio type: 0.0-1.0 (10% of traces)
+      logging: false             # Enable OpenTelemetry debug logging
+      resource_attributes:       # Custom resource attributes
+        service.version: "1.98.0"
+        deployment.environment: "production"
+        server.name: "matrix.example.com"
+      batch_config:              # Batch processor configuration
+        max_export_batch_size: 512
+        export_timeout_millis: 30000
+        schedule_delay_millis: 5000
+        max_queue_size: 2048
+      homeserver_whitelist:      # Optional: limit tracing to specific servers
+        - ".*\.example\.com"
+        - "trusted-server\.org"
+
+**Configuration Options:**
+
+* ``enabled``: Enable/disable OpenTelemetry tracing
+* ``otlp_endpoint``: OTLP HTTP endpoint URL (automatically adds /v1/traces if missing)
+* ``sampler.type``: Sampling strategy (``ratio``, ``always_on``, ``always_off``)
+* ``sampler.ratio``: Sampling probability for ratio-based sampling (0.0-1.0)
+* ``logging``: Enable OpenTelemetry SDK debug logging
+* ``resource_attributes``: Custom attributes added to all traces
+* ``batch_config``: Fine-tune batch export performance
+* ``homeserver_whitelist``: Regex patterns for servers to include in tracing
+
+**Popular OTLP Endpoints:**
+NOTE: Currently only OTLP over HTTP is supported. The exporter is beta means there can be outstanding issues.
+official Synapse only supports Opentracing via legacy Jaeger endpoint which does not work on latest versions of Jaeger v1/v2.
+This fork is updated to use latest versions via OpenTelemetry compat layers.
+* Jaeger: ``http://localhost:14268/api/traces`` (legacy) or ``http://localhost:4318/v1/traces`` (OTLP)
+* Zipkin: ``http://localhost:9411/api/v2/spans``
+* OTEL Collector: ``http://localhost:4318/v1/traces``
+* Cloud providers: Check your observability platform's OTLP endpoint documentation
+
 📦 Optional Performance Enhancements
 ====================================
 
