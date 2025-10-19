@@ -1551,6 +1551,23 @@ files = [
 ]
 
 [[package]]
+name = "matrices-evolved"
+version = "1.0.9"
+description = "High-performance Matrix event signing library"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "matrices_evolved-1.0.9-cp310-cp310-manylinux_2_34_aarch64.whl", hash = "sha256:fc92ef9710bca67eaf5276384d2f00978b9018de355900edd7cb4b86b1568290"},
+    {file = "matrices_evolved-1.0.9-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:8784f9da3754227e8c729b311a4b0db344f10c2dfffd5a57ffc535fb8ef449b3"},
+    {file = "matrices_evolved-1.0.9-cp311-cp311-manylinux_2_34_aarch64.whl", hash = "sha256:a22e20543fcc9546c25632d75670062ea04f64c40908a07065278d4b19a2015b"},
+    {file = "matrices_evolved-1.0.9-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:8d259549f2223f9f1a7e15551c154db34d708d7dc212ad9df00a36d3e108d51a"},
+]
+
+[package.dependencies]
+nanobind = ">=2.0.0"
+
+[[package]]
 name = "matrix-common"
 version = "1.3.0"
 description = "Common utilities for Synapse, Sydent and Sygnal"
@@ -1795,6 +1812,18 @@ mypy = ">=1.0.0,<1.18.0"
 
 [package.extras]
 test = ["lxml", "pytest (>=4.6)", "pytest-cov"]
+
+[[package]]
+name = "nanobind"
+version = "2.9.2"
+description = "nanobind: tiny and efficient C++/Python bindings"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "nanobind-2.9.2-py3-none-any.whl", hash = "sha256:c37957ffd5eac7eda349cff3622ecd32e5ee1244ecc912c99b5bc8188bafd16e"},
+    {file = "nanobind-2.9.2.tar.gz", hash = "sha256:e7608472de99d375759814cab3e2c94aba3f9ec80e62cfef8ced495ca5c27d6e"},
+]
 
 [[package]]
 name = "netaddr"
@@ -4049,12 +4078,12 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner (>=6.4)"]
 
 [extras]
-all = ["Pympler", "authlib", "hiredis", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pysaml2", "sentry-sdk", "txredisapi"]
+all = ["Pympler", "authlib", "hiredis", "lxml", "matrix-synapse-ldap3", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pysaml2", "sentry-sdk", "txredisapi"]
 cache-memory = ["Pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 oidc = ["authlib"]
-opentracing = ["opentracing"]
+opentracing = []
 postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
 redis = ["hiredis", "txredisapi"]
 saml2 = ["pysaml2"]
@@ -4066,4 +4095,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9.0"
-content-hash = "b5b5c7dc0310106c41f9da39c1c12c8a9d864ef8710ba05ce97b3262cfa08667"
+content-hash = "7664ea1360f05083061d66a566b27c3b0f0e21b9aa9e88c2f484fdc4267a6229"

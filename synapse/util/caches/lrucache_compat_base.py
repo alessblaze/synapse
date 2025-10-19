@@ -193,6 +193,13 @@ def _expire_rust_cache_entries(clock, expiry_seconds, hs=None):
                 total_evicted += evicted
                 alive_caches.append(cache)
                 
+                # Report eviction metrics if cache has metrics
+                m = getattr(cache, "metrics", None)
+                if evicted > 0 and m:
+                    from synapse.util.caches import EvictionReason
+                    reason = EvictionReason.size if evicting_due_to_memory else EvictionReason.time
+                    m.inc_evictions(reason, evicted)
+                
                 if evicted > 0 and LRU_DEBUG:
                     reason = "memory pressure" if evicting_due_to_memory else "time expiry"
                     logger.info(f"🧹 Cache '{cache_name}': evicted {evicted} entries due to {reason} (size: {cache_size_before} -> {cache_size_before - evicted})")
@@ -237,6 +244,16 @@ def _start_eviction_scheduler(clock, expiry_seconds, hs=None):
 
 
 
+# Import EvictionReason at module level to avoid repeated imports
+try:
+    from synapse.util.caches import EvictionReason
+except ImportError:
+    # Fallback if not available
+    class EvictionReason:
+        size = "size"
+        time = "time"
+        invalidation = "invalidation"
+
 # Startup logging to verify environment variables
 if LRU_DEBUG or LRU_INFO or LRU_ASYNC_DEBUG:
     logger.info(f"🚀 Rust LRU Cache module loaded - DEBUG={LRU_DEBUG}, INFO={LRU_INFO}, ASYNC_DEBUG={LRU_ASYNC_DEBUG}")
@@ -275,7 +292,97 @@ KT = TypeVar("KT")
 VT = TypeVar("VT")
 T = TypeVar("T")
 
+class RustMetricsBridge:
+    """Bridge between Rust cache metrics and Synapse's CacheMetric system"""
+    def __init__(self, rust_cache, synapse_metrics=None):
+        self._rust_cache = rust_cache
+        self._synapse_metrics = synapse_metrics
+        self._last_hits = 0
+        self._last_misses = 0
+        self._last_size_evictions = 0
+        self._last_invalidation_evictions = 0
+    
+    def inc_hits(self):
+        if self._synapse_metrics:
+            self._synapse_metrics.inc_hits()
+    
+    def inc_misses(self):
+        if self._synapse_metrics:
+            self._synapse_metrics.inc_misses()
+    
+    def inc_evictions(self, reason, count=1):
+        if self._synapse_metrics:
+            self._synapse_metrics.inc_evictions(reason, count)
+    
+    def inc_memory_usage(self, size):
+        if self._synapse_metrics:
+            self._synapse_metrics.inc_memory_usage(size)
+    
+    def dec_memory_usage(self, size):
+        if self._synapse_metrics:
+            self._synapse_metrics.dec_memory_usage(size)
+    
+    def clear_memory_usage(self):
+        if self._synapse_metrics:
+            self._synapse_metrics.clear_memory_usage()
+    
+    def sync_rust_metrics(self):
+        """Sync Rust cache metrics to Synapse metrics system"""
+        if not self._rust_cache or not self._synapse_metrics:
+            return
+        
+        try:
+            current_hits = self._rust_cache.get_hits()
+            current_misses = self._rust_cache.get_misses()
+            current_size_evictions = self._rust_cache.get_evictions_size()
+            current_invalidation_evictions = self._rust_cache.get_evictions_invalidation()
+            
+            hit_delta = current_hits - self._last_hits
+            miss_delta = current_misses - self._last_misses
+            size_eviction_delta = current_size_evictions - self._last_size_evictions
+            invalidation_eviction_delta = current_invalidation_evictions - self._last_invalidation_evictions
+            
+            # Guard against counter resets - if deltas are negative, just refresh baselines
+            if hit_delta < 0 or miss_delta < 0 or size_eviction_delta < 0 or invalidation_eviction_delta < 0:
+                # Counter reset detected, update baselines without incrementing
+                pass
+            else:
+                # Use API calls for hits/misses
+                for _ in range(hit_delta):
+                    self._synapse_metrics.inc_hits()
+                for _ in range(miss_delta):
+                    self._synapse_metrics.inc_misses()
+            if size_eviction_delta > 0:
+                from synapse.util.caches import EvictionReason
+                self._synapse_metrics.inc_evictions(EvictionReason.size, size_eviction_delta)
+            if invalidation_eviction_delta > 0:
+                from synapse.util.caches import EvictionReason
+                self._synapse_metrics.inc_evictions(EvictionReason.invalidation, invalidation_eviction_delta)
+            
+            try:
+                memory_usage = self._rust_cache.get_memory_usage()
+                if hasattr(self._synapse_metrics, 'memory_usage'):
+                    self._synapse_metrics.memory_usage = memory_usage
+            except:
+                pass
+            
+            self._last_hits = current_hits
+            self._last_misses = current_misses
+            self._last_size_evictions = current_size_evictions
+            self._last_invalidation_evictions = current_invalidation_evictions
+            
+        except Exception as e:
+            if LRU_DEBUG:
+                logger.warning(f"Failed to sync Rust metrics: {e}")
+    
+    def record_cache_hit(self, cache_name=None):
+        self.inc_hits()
+    
+    def record_cache_miss(self, cache_name=None):
+        self.inc_misses()
+
 class MockMetrics:
+    """Fallback metrics class when no real metrics are available"""
     def __init__(self):
         self.hits = 0
         self.misses = 0
@@ -618,10 +725,11 @@ class LruCache(Generic[KT, VT]):
         else:
             self._clock = clock
         
-        # Create metrics if needed
+        # Create Synapse metrics first
+        synapse_metrics = None
         if cache_name and server_name:
             try:
-                self.metrics = register_cache(
+                synapse_metrics = register_cache(
                     cache_type="rust_lru_cache",
                     cache_name=cache_name,
                     cache=self,
@@ -631,11 +739,28 @@ class LruCache(Generic[KT, VT]):
             except Exception as e:
                 if LRU_DEBUG:
                     logger.error(f"❌ Failed to register Rust cache '{cache_name}' with cleanup system: {e}")
-                self.metrics = MockMetrics()
+                synapse_metrics = None
+        
+        # Create Rust cache
+        self._rust_cache = create_rust_lru_cache(self.max_size, cache_name, None, None, self._size_callback)
+        
+        # Create metrics bridge that connects Rust metrics to Synapse metrics
+        if synapse_metrics:
+            self.metrics = RustMetricsBridge(self._rust_cache, synapse_metrics)
+            # Set up periodic sync of metrics
+            if hasattr(synapse_metrics, '_collect_callback'):
+                original_callback = synapse_metrics._collect_callback
+                def enhanced_callback():
+                    self.metrics.sync_rust_metrics()
+                    if original_callback:
+                        original_callback()
+                synapse_metrics._collect_callback = enhanced_callback
+            else:
+                def sync_callback():
+                    self.metrics.sync_rust_metrics()
+                synapse_metrics._collect_callback = sync_callback
         else:
             self.metrics = MockMetrics() if cache_name else None
-            
-        self._rust_cache = create_rust_lru_cache(self.max_size, cache_name, self.metrics, None, self._size_callback)
         
         # Activate RustCacheNode system for global eviction
         if prune_unread_entries:
@@ -1028,9 +1153,10 @@ class AsyncLruCache(Generic[KT, VT]):
         
         # Register with Synapse's cleanup system first to get metrics object
         server_name = kwargs.get('server_name')
+        synapse_metrics = None
         if self.cache_name and server_name:
             try:
-                self.metrics = register_cache(
+                synapse_metrics = register_cache(
                     cache_type="rust_lru_cache",
                     cache_name=self.cache_name,
                     cache=self,
@@ -1040,10 +1166,28 @@ class AsyncLruCache(Generic[KT, VT]):
                 logger.info(f"✅ AsyncLruCache '{self.cache_name}' registered with cleanup system")
             except Exception as e:
                 logger.error(f"❌ Failed to register AsyncLruCache '{self.cache_name}' with cleanup system: {e}")
-                self.metrics = MockMetrics()
+                synapse_metrics = None
         
-        # Create local sync Rust cache for sync operations with registered metrics
-        self._sync_rust_cache = RustLruCache(max_size, f"{self.cache_name}_sync", self.metrics)
+        # Create local sync Rust cache for sync operations
+        self._sync_rust_cache = RustLruCache(max_size, f"{self.cache_name}_sync", None)
+        
+        # Create metrics bridge
+        if synapse_metrics:
+            self.metrics = RustMetricsBridge(self._sync_rust_cache, synapse_metrics)
+            # Set up collect callback to sync metrics during scrapes
+            if hasattr(synapse_metrics, '_collect_callback'):
+                original_callback = synapse_metrics._collect_callback
+                def enhanced_callback():
+                    self.metrics.sync_rust_metrics()
+                    if original_callback:
+                        original_callback()
+                synapse_metrics._collect_callback = enhanced_callback
+            else:
+                def sync_callback():
+                    self.metrics.sync_rust_metrics()
+                synapse_metrics._collect_callback = sync_callback
+        else:
+            self.metrics = MockMetrics()
         self._rust_cache = self._sync_rust_cache  # Reference for eviction scheduler
         
         # Activate RustCacheNode system for async cache too
@@ -1056,13 +1200,13 @@ class AsyncLruCache(Generic[KT, VT]):
         
         try:
             current_loop = asyncio.get_running_loop()
-            self._async_rust_cache = AsyncRustLruCache(max_size, f"{self.cache_name}_async", self.metrics)
+            self._async_rust_cache = AsyncRustLruCache(max_size, f"{self.cache_name}_async", None)
             self._global_loop = current_loop
             self._is_async = True
         except RuntimeError:
             try:
                 current_loop = asyncio.get_event_loop()
-                self._async_rust_cache = AsyncRustLruCache(max_size, f"{self.cache_name}_async", self.metrics)
+                self._async_rust_cache = AsyncRustLruCache(max_size, f"{self.cache_name}_async", None)
                 self._global_loop = current_loop
                 self._is_async = True
             except Exception as e:
