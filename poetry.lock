@@ -1552,16 +1552,16 @@ files = [
 
 [[package]]
 name = "matrices-evolved"
-version = "1.0.9"
+version = "1.0.10"
 description = "High-performance Matrix event signing library"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "matrices_evolved-1.0.9-cp310-cp310-manylinux_2_34_aarch64.whl", hash = "sha256:fc92ef9710bca67eaf5276384d2f00978b9018de355900edd7cb4b86b1568290"},
-    {file = "matrices_evolved-1.0.9-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:8784f9da3754227e8c729b311a4b0db344f10c2dfffd5a57ffc535fb8ef449b3"},
-    {file = "matrices_evolved-1.0.9-cp311-cp311-manylinux_2_34_aarch64.whl", hash = "sha256:a22e20543fcc9546c25632d75670062ea04f64c40908a07065278d4b19a2015b"},
-    {file = "matrices_evolved-1.0.9-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:8d259549f2223f9f1a7e15551c154db34d708d7dc212ad9df00a36d3e108d51a"},
+    {file = "matrices_evolved-1.0.10-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:1a07d26a1180195b1d42a745e0a331934354125e5922b9893d4e87f309b93ad0"},
+    {file = "matrices_evolved-1.0.10-cp310-cp310-manylinux_2_34_aarch64.whl", hash = "sha256:bc09432938fb6f9f825ab9027b8b3b024592538aff5984eadcdff563b386ca14"},
+    {file = "matrices_evolved-1.0.10-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:0d15a25ada6687ac1da1f27f04c15e71f36140ccba2eeb3d9ffdfe423ddfc8d1"},
+    {file = "matrices_evolved-1.0.10-cp311-cp311-manylinux_2_34_aarch64.whl", hash = "sha256:c4671e701cb23e76a25820f765f6019cf2473ed6a5cb6a1e70caaaaf9affcd63"},
 ]
 
 [package.dependencies]
@@ -4095,4 +4095,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9.0"
-content-hash = "7664ea1360f05083061d66a566b27c3b0f0e21b9aa9e88c2f484fdc4267a6229"
+content-hash = "28b37e80316554f8387f3cedd5c737b8d7f1c5cef97f35c5042ae6df61e48755"

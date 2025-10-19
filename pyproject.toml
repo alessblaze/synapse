@@ -267,7 +267,7 @@ opentelemetry-sdk = "^1.37.0"
 opentelemetry-exporter-otlp-proto-http = "^1.37.0"
 opentelemetry-opentracing-shim = "^0.58b0"
 opentelemetry-exporter-otlp = "^1.37.0"
-matrices-evolved = "^1.0.9"
+matrices-evolved = "^1.0.10"
 
 [tool.poetry.extras]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified
