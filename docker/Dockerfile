@@ -142,10 +142,10 @@ RUN \
       libwebp7 \
       xmlsec1 \
       libjemalloc2 \
-      libicu \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
+    chown _apt:root /tmp/debs-${arch} && \
     cd /tmp/debs-${arch} && \
     apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
   done
@@ -176,11 +176,6 @@ LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synap
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
 
-# On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
-# libraries to the right place, else the `COPY` won't work.
-# On amd64, we'll also have a /lib64 folder with ld-linux-x86-64.so.2, which is
-# already present in the runtime image.
-COPY --from=runtime-deps /install-${TARGETARCH}/lib /usr/lib
 COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
 COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
 COPY --from=runtime-deps /install-${TARGETARCH}/var /var

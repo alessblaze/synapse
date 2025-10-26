@@ -20,7 +20,7 @@
 #
 #
 
-from typing import Any, List, Set
+from typing import Any
 
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
@@ -88,7 +88,7 @@ class TracerConfig(Config):
         if not isinstance(self.resource_attributes, dict):
             raise ConfigError("resource_attributes must be a dictionary")
 
-        self.force_tracing_for_users: Set[str] = set()
+        self.force_tracing_for_users: set[str] = set()
 
         if not self.opentracer_enabled:
             return
@@ -107,7 +107,7 @@ class TracerConfig(Config):
 
         # The tracer is enabled so sanitize the config
 
-        self.opentracer_whitelist: List[str] = opentracing_config.get(
+        self.opentracer_whitelist: list[str] = opentracing_config.get(
             "homeserver_whitelist", []
         )
         if not isinstance(self.opentracer_whitelist, list):
