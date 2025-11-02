@@ -20,8 +20,8 @@
 # `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
 # in `poetry export` in the past.
 
-ARG DEBIAN_VERSION=bookworm
-ARG PYTHON_VERSION=3.11
+ARG DEBIAN_VERSION=trixie
+ARG PYTHON_VERSION=3.13
 ARG POETRY_VERSION=2.1.1
 
 ###
