@@ -237,7 +237,17 @@ def main(args: list[str], environ: MutableMapping[str, str]) -> None:
     if "-m" not in args:
         args = ["-m", synapse_worker] + args
 
-    jemallocpath = "/usr/lib/%s-linux-gnu/libjemalloc.so.2" % (platform.machine(),)
+    possible_paths = [
+    "/usr/lib/%s-linux-gnu/libjemalloc.so.2" % platform.machine(),  # Debian/Ubuntu
+    "/usr/lib64/libjemalloc.so.2",  # openSUSE/RHEL 64-bit
+    "/usr/lib/libjemalloc.so.2",    # Generic fallback
+    ]
+    jemallocpath = None
+    for path in possible_paths:
+        if os.path.isfile(path):
+            jemallocpath = path
+            break
+     
 
     if os.path.isfile(jemallocpath):
         environ["LD_PRELOAD"] = jemallocpath

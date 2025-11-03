@@ -1521,7 +1521,7 @@ files = [
     {file = "matrices_evolved-1.0.10-cp311-cp311-manylinux_2_34_aarch64.whl", hash = "sha256:c4671e701cb23e76a25820f765f6019cf2473ed6a5cb6a1e70caaaaf9affcd63"},
     {file = "matrices_evolved-1.0.10-cp311-cp311-manylinux_2_34_x86_64.whl", hash = "sha256:0d15a25ada6687ac1da1f27f04c15e71f36140ccba2eeb3d9ffdfe423ddfc8d1"},
     {file = "matrices_evolved-1.0.10-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:7b75fb63fcd6774734d895e5e238b063b6f148ce4219818435ae38952de069f1"},
-    {file = "matrices_evolved-1.0.10-cp313-cp313-manylinux_2_39_aarch64.whl", hash = "sha256:98ddd896e6ac454ccfe60e75daeba3dd85ca07eadc61eb04628b482d5eb24097"},
+    {file = "matrices_evolved-1.0.10-cp313-cp313-manylinux_2_34_aarch64.whl", hash = "sha256:f9a81ecaf0c162f67fe588c9c26bfb3162797945ee93dcf34d6ba871f853e343"},
 ]
 
 [package.dependencies]

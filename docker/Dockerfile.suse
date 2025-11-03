@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
-# Dockerfile to build the matrixdotorg/synapse:suse docker images which
-# don't exist so you have to build them manually.
+# Dockerfile to build the matrixdotorg/synapse docker images.
 #
 # Note that it uses features which are only available in BuildKit - see
 # https://docs.docker.com/go/buildkit/ for more information.
@@ -21,15 +20,24 @@
 # `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
 # in `poetry export` in the past.
 
-ARG DEBIAN_VERSION=trixie
+# IMPORTANT: Do not change bookworm here because bookworm has glibc 2.36 which is lower than
+# the glibc version 2.38 in SLES 15 SP7 base image. So the dependency resolution in stage 0 needs 
+# to have bookworm for compatible glibc versions to be copied if we do not want to manually build 
+# an astral-uv image currently. we have python 3.14 custom in dockerfile build commands also which
+# in future can be used if sles does not provide python 3.14.
+# currently we are using SLES as base because it does have suse built python package already.
+# we do have scripts to make rhel minimal rootfs also but that is not used currently.
+
+ARG DEBIAN_VERSION=bookworm
 ARG PYTHON_VERSION=3.13
 ARG POETRY_VERSION=2.1.1
+ARG GOSU-VER=1.19
 
 ###
 ### Stage 0: generate requirements.txt
 ###
 ### This stage is platform-agnostic, so we can use the build platform in case of cross-compilation.
-###
+### 
 FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS requirements
 
 WORKDIR /synapse
@@ -117,81 +125,55 @@ RUN \
   fi
 
 ###
-### Stage 2: runtime dependencies download for ARM64 and AMD64
+### Stage 2: Distroless minimal rootfs builder
 ###
-FROM --platform=$BUILDPLATFORM docker.io/library/debian:${DEBIAN_VERSION} AS runtime-deps
+FROM registry.suse.com/suse/sle15:15.7 AS distroless-builder
+RUN rpm --import https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/gpg-pubkey-39db7c82-5f68629b.asc
+RUN zypper -n --gpg-auto-import-keys refresh && zypper -n --gpg-auto-import-keys update && zypper --gpg-auto-import-keys ref --force 
 
-# Tell apt to keep downloaded package files, as we're using cache mounts.
-RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
-
-# Add both target architectures
-RUN dpkg --add-architecture arm64
-RUN dpkg --add-architecture amd64
-
-# Fetch the runtime dependencies debs for both architectures
-# We do that by building a recursive list of packages we need to download with `apt-cache depends`
-# and then downloading them with `apt-get download`.
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update -qq && \
-  apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
-      curl \
-      gosu \
-      libjpeg62-turbo \
-      libpq5 \
-      libwebp7 \
-      xmlsec1 \
-      libjemalloc2 \
-    | grep '^\w' > /tmp/pkg-list && \
-  for arch in arm64 amd64; do \
-    mkdir -p /tmp/debs-${arch} && \
-    chown _apt:root /tmp/debs-${arch} && \
-    cd /tmp/debs-${arch} && \
-    apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
-  done
-
-# Extract the debs for each architecture
-RUN \
-  for arch in arm64 amd64; do \
-    mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
-    for deb in /tmp/debs-${arch}/*.deb; do \
-      package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
-      echo "Extracting: ${package_name}"; \
-      dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
-      dpkg --extract $deb /install-${arch}; \
-    done; \
-  done
+# Copy bci-null.sh script
+ADD ./docker/bci-null.sh /tmp/
+# Create minimal rootfs with only what Synapse needs
+RUN bash /tmp/bci-null.sh \
+    python313 \
+    libjpeg62 \
+    libpq5 \
+    libwebp7 \
+    xmlsec1 \
+    libjemalloc2 \
+    curl \ 
+    glibc-locale-base \
+    findutils \
+    sed
 
 
 ###
 ### Stage 3: runtime
 ###
 
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
+FROM registry.suse.com/bci/bci-micro:15.7
 
 ARG TARGETARCH
+ARG GOSU-VER
 
-LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
-LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
-LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
-LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
+COPY --from=distroless-builder /tmp/null/rootfs/ /
 
-COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
-COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
-COPY --from=runtime-deps /install-${TARGETARCH}/var /var
+RUN ln -s /usr/bin/python3.13 /usr/bin/python3 && \
+    ln -s /usr/bin/python3.13 /usr/bin/python && \
+    ln -s /usr/bin/python3.13 /usr/local/bin/python
 
-# Copy the installed python packages from the builder stage.
-#
-# uv will generate a `.lock` file when installing packages, which we don't want
-# to copy to the final image.
-COPY --from=builder  --exclude=.lock /install /usr/local
+# Download gosu binary for the target architecture
+RUN curl -L "https://github.com/tianon/gosu/releases/download/${GOSU_VER}/gosu-${TARGETARCH}" \
+    -o /usr/local/bin/gosu && \
+    chmod +x /usr/local/bin/gosu && \
+    ln -s /usr/local/bin/gosu /usr/bin/gosu && \
+    ln -s /usr/local/bin/gosu /bin/gosu
+
+COPY --from=builder --exclude=.lock /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp
-
 ENTRYPOINT ["/start.py"]
-
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
   CMD curl -fSs http://localhost:8008/health || exit 1
