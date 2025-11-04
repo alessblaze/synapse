@@ -157,6 +157,9 @@ ARG TARGETARCH
 ARG GOSU-VER
 
 COPY --from=distroless-builder /tmp/null/rootfs/ /
+COPY --from=builder --exclude=.lock /install /usr/local
+COPY ./docker/start.py /start.py
+COPY ./docker/conf /conf
 
 RUN ln -s /usr/bin/python3.13 /usr/bin/python3 && \
     ln -s /usr/bin/python3.13 /usr/bin/python && \
@@ -168,10 +171,6 @@ RUN curl -L "https://github.com/tianon/gosu/releases/download/${GOSU_VER}/gosu-$
     chmod +x /usr/local/bin/gosu && \
     ln -s /usr/local/bin/gosu /usr/bin/gosu && \
     ln -s /usr/local/bin/gosu /bin/gosu
-
-COPY --from=builder --exclude=.lock /install /usr/local
-COPY ./docker/start.py /start.py
-COPY ./docker/conf /conf
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp
 ENTRYPOINT ["/start.py"]
