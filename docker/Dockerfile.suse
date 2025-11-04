@@ -31,7 +31,7 @@
 ARG DEBIAN_VERSION=bookworm
 ARG PYTHON_VERSION=3.13
 ARG POETRY_VERSION=2.1.1
-ARG GOSU-VER=1.19
+ARG GOSU_VER=1.19
 
 ###
 ### Stage 0: generate requirements.txt
@@ -154,7 +154,7 @@ RUN bash /tmp/bci-null.sh \
 FROM registry.suse.com/bci/bci-micro:15.7
 
 ARG TARGETARCH
-ARG GOSU-VER
+ARG GOSU_VER
 
 COPY --from=distroless-builder /tmp/null/rootfs/ /
 COPY --from=builder --exclude=.lock /install /usr/local
@@ -166,11 +166,12 @@ RUN ln -s /usr/bin/python3.13 /usr/bin/python3 && \
     ln -s /usr/bin/python3.13 /usr/local/bin/python
 
 # Download gosu binary for the target architecture
-RUN curl -L "https://github.com/tianon/gosu/releases/download/${GOSU_VER}/gosu-${TARGETARCH}" \
+RUN curl -L "https://github.com/alessblaze/gosu/releases/download/${GOSU_VER}/gosu-${TARGETARCH}" \
     -o /usr/local/bin/gosu && \
     chmod +x /usr/local/bin/gosu && \
     ln -s /usr/local/bin/gosu /usr/bin/gosu && \
-    ln -s /usr/local/bin/gosu /bin/gosu
+    ln -s /usr/local/bin/gosu /bin/gosu && \
+    ln -s /usr/local/bin/gosu /usr/sbin/gosu
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp
 ENTRYPOINT ["/start.py"]
