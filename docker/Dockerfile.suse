@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1
-# Dockerfile to build the matrixdotorg/synapse docker images.
-#
-# Note that it uses features which are only available in BuildKit - see
-# https://docs.docker.com/go/buildkit/ for more information.
+# Dockerfile to build the matrixdotorg/synapse:suse docker images which
+# don't exist so you have to build them manually.
 #
 # To build the image, run `docker build` command from the root of the
 # synapse repository:
@@ -20,26 +18,21 @@
 # `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
 # in `poetry export` in the past.
 
-# IMPORTANT: Do not change bookworm here because bookworm has glibc 2.36 which is lower than
-# the glibc version 2.38 in SLES 15 SP7 base image. So the dependency resolution in stage 0 needs 
-# to have bookworm for compatible glibc versions to be copied if we do not want to manually build 
-# an astral-uv image currently. we have python 3.14 custom in dockerfile build commands also which
-# in future can be used if sles does not provide python 3.14.
-# currently we are using SLES as base because it does have suse built python package already.
-# we do have scripts to make rhel minimal rootfs also but that is not used currently.
+# Custom astral-uv images are ready, moving forward to SLES16.0 which should be ABI compatible with Leap16.0
+# Complete glibc and other dependency compatiblity currently being tested.
 
-ARG DEBIAN_VERSION=bookworm
-ARG PYTHON_VERSION=3.13
+ARG LEAP_VERSION=leap16
+ARG PYTHON_VERSION=313
 ARG POETRY_VERSION=2.1.1
 ARG GOSU_VER=1.19
-
+ARG SLES_VERSION=16.0
 ###
 ### Stage 0: generate requirements.txt
 ###
 ### This stage is platform-agnostic, so we can use the build platform in case of cross-compilation.
 ### 
-FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS requirements
-
+#FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS requirements
+FROM alessmicro/astral-uv:${LEAP_VERSION}-python${PYTHON_VERSION} AS requirements
 WORKDIR /synapse
 
 # Copy just what we need to run `poetry export`...
@@ -74,7 +67,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ###
 ### Stage 1: builder
 ###
-FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS builder
+FROM alessmicro/astral-uv:${LEAP_VERSION}-python${PYTHON_VERSION} AS builder
 
 # This silences a warning as uv isn't able to do hardlinks between its cache
 # (mounted as --mount=type=cache) and the target directory.
@@ -83,7 +76,7 @@ ENV UV_LINK_MODE=copy
 # Install rust and ensure its in the PATH
 ENV RUSTUP_HOME=/rust
 ENV CARGO_HOME=/cargo
-ENV PATH=/cargo/bin:/rust/bin:$PATH
+ENV PATH=/cargo/bin:/rust/bin:/usr/pgsql-17/bin:$PATH
 RUN mkdir /rust /cargo
 
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable --profile minimal
@@ -92,7 +85,13 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-tool
 # set to true, so we expose it as a build-arg.
 ARG CARGO_NET_GIT_FETCH_WITH_CLI=false
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
-
+RUN zypper -n --gpg-auto-import-keys refresh && zypper -n --gpg-auto-import-keys update && zypper --gpg-auto-import-keys ref --force 
+#RUN rpm --import https://zypp.postgresql.org/keys/PGDG-RPM-GPG-KEY-SLES15; zypper -n install https://download.postgresql.org/pub/repos/zypp/reporpms/SLES-15-x86_64/pgdg-suse-repo-latest.noarch.rpm
+RUN zypper -n install postgresql17 postgresql17-devel postgresql17-contrib postgresql17-server-devel gcc15 gcc15-c++ make automake autoconf libtool gawk python313-devel
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 50
+RUN update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 50
+RUN update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-15 50
+RUN update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-15 50
 # To speed up rebuilds, install all of the dependencies before we copy over
 # the whole synapse project, so that this layer in the Docker cache can be
 # used while you develop on the source
@@ -127,10 +126,10 @@ RUN \
 ###
 ### Stage 2: Distroless minimal rootfs builder
 ###
-FROM registry.suse.com/suse/sle15:15.7 AS distroless-builder
+FROM registry.suse.com/bci/bci-base:${SLES_VERSION} AS distroless-builder
 RUN rpm --import https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/gpg-pubkey-39db7c82-5f68629b.asc
 RUN zypper -n --gpg-auto-import-keys refresh && zypper -n --gpg-auto-import-keys update && zypper --gpg-auto-import-keys ref --force 
-
+RUN zypper -n update
 # Copy bci-null.sh script
 ADD ./docker/bci-null.sh /tmp/
 # Create minimal rootfs with only what Synapse needs
@@ -151,7 +150,7 @@ RUN bash /tmp/bci-null.sh \
 ### Stage 3: runtime
 ###
 
-FROM registry.suse.com/bci/bci-micro:15.7
+FROM registry.suse.com/bci/bci-micro:${SLES_VERSION}
 
 ARG TARGETARCH
 ARG GOSU_VER
@@ -161,8 +160,7 @@ COPY --from=builder --exclude=.lock /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
-RUN ln -s /usr/bin/python3.13 /usr/bin/python3 && \
-    ln -s /usr/bin/python3.13 /usr/bin/python && \
+RUN ln -s /usr/bin/python3.13 /usr/bin/python && \
     ln -s /usr/bin/python3.13 /usr/local/bin/python
 
 # Download gosu binary for the target architecture
@@ -170,7 +168,6 @@ RUN curl -L "https://github.com/alessblaze/gosu/releases/download/${GOSU_VER}/go
     -o /usr/local/bin/gosu && \
     chmod +x /usr/local/bin/gosu && \
     ln -s /usr/local/bin/gosu /usr/bin/gosu && \
-    ln -s /usr/local/bin/gosu /bin/gosu && \
     ln -s /usr/local/bin/gosu /usr/sbin/gosu
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp

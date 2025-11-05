@@ -36,12 +36,12 @@ libbrotlidec1
 libbz2-1
 libcom_err2
 libexpat1
-libffi7
+libffi8
 libgcrypt20
 libgpg-error0
 libjitterentropy3
 liblzma5
-libreadline7
+libreadline8
 libnghttp2-14
 libssh4
 libpsl5
@@ -55,6 +55,7 @@ libldap-data
 libltdl7
 libstdc++6
 terminfo-base
+libmpdec4
 EOF
 
 
@@ -99,7 +100,7 @@ mkdir -p "$rootfs"
 
 # Refresh repositories before installing to chroot
 # in a chroot older keys are not available so we import them manually
-rpm -r "$rootfs" --import https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/gpg-pubkey-39db7c82-5f68629b.asc
+#rpm -r "$rootfs" --import https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/gpg-pubkey-39db7c82-5f68629b.asc
 zypper --installroot "$rootfs" -n  --gpg-auto-import-keys refresh --force
 <keep xargs zypper --installroot "$rootfs" -n --gpg-auto-import-keys in --no-recommends
 zypper --installroot "$rootfs" clean -a
