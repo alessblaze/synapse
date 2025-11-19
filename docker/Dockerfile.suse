@@ -127,7 +127,7 @@ RUN \
 ### Stage 2: Distroless minimal rootfs builder
 ###
 FROM registry.suse.com/bci/bci-base:${SLES_VERSION} AS distroless-builder
-RUN rpm --import https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/gpg-pubkey-39db7c82-5f68629b.asc
+#RUN rpm --import https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/gpg-pubkey-39db7c82-5f68629b.asc
 RUN zypper -n --gpg-auto-import-keys refresh && zypper -n --gpg-auto-import-keys update && zypper --gpg-auto-import-keys ref --force 
 RUN zypper -n update
 # Copy bci-null.sh script
