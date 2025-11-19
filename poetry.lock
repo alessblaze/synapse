@@ -911,7 +911,7 @@ files = [
     {file = "importlib_metadata-6.7.0-py3-none-any.whl", hash = "sha256:cb52082e659e97afc5dac71e79de97d8681de3aa07ff18578330904a9d18e5b5"},
     {file = "importlib_metadata-6.7.0.tar.gz", hash = "sha256:1aaf550d4f73e5d6783e7acb77aec43d49da8017410afae93822cc9cca98c4d4"},
 ]
-markers = {dev = "python_version < \"3.12\" and platform_machine != \"ppc64le\" and platform_machine != \"s390x\""}
+markers = {dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\""}
 
 [package.dependencies]
 zipp = ">=0.5"
@@ -3521,7 +3521,7 @@ files = [
     {file = "zipp-3.19.1-py3-none-any.whl", hash = "sha256:2828e64edb5386ea6a52e7ba7cdb17bb30a73a858f5eb6eb93d8d36f5ea26091"},
     {file = "zipp-3.19.1.tar.gz", hash = "sha256:35427f6d5594f4acf82d25541438348c26736fa9b3afa2754bcd63cdb99d8e8f"},
 ]
-markers = {dev = "python_version < \"3.12\" and platform_machine != \"ppc64le\" and platform_machine != \"s390x\""}
+markers = {dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\""}
 
 [package.extras]
 doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linker (>=1.9)", "sphinx (>=3.5)", "sphinx-lint"]
@@ -3614,8 +3614,8 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner"]
 
 [extras]
-all = ["authlib", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2-ams", "sentry-sdk", "txredisapi"]
-cache-memory = ["pympler"]
+all = ["Pympler", "authlib", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pysaml2-ams", "sentry-sdk", "txredisapi"]
+cache-memory = ["Pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 oidc = ["authlib"]
@@ -3630,5 +3630,5 @@ url-preview = ["lxml"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.10.0,<4.0.0"
-content-hash = "bf37ead2285c9800026e012fcd93f26ca774588c91696788d21084ed49dadf19"
+python-versions = "^3.10.0"
+content-hash = "8eb96641655920338e93fc386d8e747b40dfc607f06c665f7f61cc3ac4c518db"
