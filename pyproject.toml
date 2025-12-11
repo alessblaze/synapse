@@ -101,6 +101,7 @@ dependencies = [
     "opentelemetry-opentracing-shim>=0.58b0",
     "opentelemetry-exporter-otlp>=1.37.0",
     "matrices-evolved (>=1.0.10,<2.0.0)",
+    "psycopg2 (>=2.9.11,<3.0.0)",
 ]
 
 [project.optional-dependencies]

@@ -1490,6 +1490,7 @@ files = [
     {file = "matrices_evolved-1.0.10-cp313-cp313-manylinux_2_34_aarch64.whl", hash = "sha256:f9a81ecaf0c162f67fe588c9c26bfb3162797945ee93dcf34d6ba871f853e343"},
 ]
 
+
 [package.dependencies]
 nanobind = ">=2.0.0"
 
@@ -2137,10 +2138,9 @@ files = [
 name = "psycopg2"
 version = "2.9.11"
 description = "psycopg2 - Python-PostgreSQL Database Adapter"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"postgres\" or extra == \"all\""
 files = [
     {file = "psycopg2-2.9.11-cp310-cp310-win_amd64.whl", hash = "sha256:103e857f46bb76908768ead4e2d0ba1d1a130e7b8ed77d3ae91e8b33481813e8"},
     {file = "psycopg2-2.9.11-cp311-cp311-win_amd64.whl", hash = "sha256:210daed32e18f35e3140a1ebe059ac29209dd96468f2f7559aa59f75ee82a5cb"},
@@ -3774,4 +3774,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "0c65ea81d1d82c74337e42a8d7d7d5f5e8134b12178c2504929fc6a3dd3ce342"
+content-hash = "33258e0a454032536b314c4f0a4a4bb19c56692d3615bf1aee43f488332c0270"
