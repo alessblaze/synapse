@@ -37,6 +37,8 @@ try:
     # ModuleApiTestCase::test_get_global_no_mutability
     # ThirdPartyRulesTestCase::test_cannot_modify_event 
     # These tests may fail. maybe will be fixed in future if needed.
+    # If you are reading this to understand more. You ain't crossing any strictly guarded boundary ever, probably the best
+    # boundary is FFI only, where in memory protection is not very strict, so we best only speak about it twice a day.
     from synapse.util.canonicaljson_compat import MATRICES_EVOLVED_AVAILABLE
 except Exception:
     MATRICES_EVOLVED_AVAILABLE = False
