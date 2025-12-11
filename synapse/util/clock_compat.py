@@ -23,7 +23,7 @@ from typing import (
 
 from typing_extensions import ParamSpec
 from zope.interface import implementer
-
+from synapse.util.duration import Duration
 from twisted.internet import defer, task
 from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IDelayedCall
@@ -76,14 +76,14 @@ class Clock:
         self.cancel_all_looping_calls()
         self.cancel_all_delayed_calls()
 
-    async def sleep(self, seconds: float) -> None:
+    async def sleep(self, duration: Duration) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         # Start task in the `sentinel` logcontext, to avoid leaking the current context
         # into the reactor once it finishes.
         with context.PreserveLoggingContext():
             # We can ignore the lint here since this class is the one location callLater should
             # be called.
-            self._reactor.callLater(seconds, d.callback, seconds)  # type: ignore[call-later-not-tracked]
+            self._reactor.callLater(duration.as_secs(), d.callback, duration.as_secs())  # type: ignore[call-later-not-tracked]
             await d
 
     def time(self) -> float:
@@ -97,7 +97,7 @@ class Clock:
     def looping_call(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
@@ -120,12 +120,12 @@ class Clock:
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(f, msec, False, *args, **kwargs)
+        return self._looping_call_common(f, duration, False, *args, **kwargs)
 
     def looping_call_now(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
@@ -144,12 +144,12 @@ class Clock:
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(f, msec, True, *args, **kwargs)
+        return self._looping_call_common(f, duration, True, *args, **kwargs)
 
     def _looping_call_common(
         self,
         f: Callable[P, object],
-        msec: float,
+        duration: Duration,
         now: bool,
         *args: P.args,
         **kwargs: P.kwargs,
@@ -200,7 +200,7 @@ class Clock:
         # We want to start the task in the `sentinel` logcontext, to avoid leaking the
         # current context into the reactor after the function finishes.
         with context.PreserveLoggingContext():
-            d = call.start(msec / 1000.0, now=now)
+            d = call.start(duration.as_secs(), now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         d.addBoth(lambda _: self._looping_calls.remove(call) if call in self._looping_calls else None)
         
@@ -225,7 +225,7 @@ class Clock:
 
     def call_later(
         self,
-        delay: float,
+        delay: Duration,
         callback: Callable,
         *args: Any,
         call_later_cancel_on_shutdown: bool = True,
@@ -303,7 +303,7 @@ class Clock:
             # We can ignore the lint here since this class is the one location callLater
             # should be called.
             call = self._reactor.callLater(
-                delay, create_wrapped_callback(True), *args, **kwargs
+                delay.as_secs(), create_wrapped_callback(True), *args, **kwargs
             )  # type: ignore[call-later-not-tracked]
             call = DelayedCallWrapper(call, call_id, self)
             self._call_id_to_delayed_call[call_id] = call
@@ -312,7 +312,7 @@ class Clock:
             # We can ignore the lint here since this class is the one location callLater should
             # be called.
             return self._reactor.callLater(
-                delay, create_wrapped_callback(False), *args, **kwargs
+                delay.as_secs(), create_wrapped_callback(False), *args, **kwargs
             )  # type: ignore[call-later-not-tracked]
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:

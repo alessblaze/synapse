@@ -30,7 +30,7 @@ from matrices_evolved.rust import (
 from synapse.config import cache as cache_config
 from synapse.metrics.jemalloc import get_jemalloc_stats
 from synapse.util.caches import register_cache
-
+from synapse.util.duration import Duration
 from synapse.util.caches.treecache import TreeCache as PyTreeCache
 
 # Use compatibility clock to fix AlreadyCalled errors
@@ -222,7 +222,7 @@ def _start_eviction_scheduler(clock, expiry_seconds, hs=None):
     if clock:
         _EVICTION_SCHEDULER = clock.looping_call(
             _expire_rust_cache_entries,
-            30 * 1000,  # 30 seconds in ms
+            Duration(seconds=30),  # 30 seconds in ms
             clock,
             expiry_seconds,
             hs  # Pass HomeServer for cache-specific TTL lookups

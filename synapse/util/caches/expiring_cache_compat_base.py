@@ -8,7 +8,7 @@ from synapse.config import cache as cache_config
 from synapse.util.caches import EvictionReason, register_cache
 from synapse.util.clock import Clock
 from synapse.util.clock_compat import Clock as CompatClock
-
+from synapse.util.duration import Duration 
 from synapse.util.caches.lrucache_compat_base import LruCache as RustLruCache, _SENTINEL, _MISS
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,8 @@ class ExpiringCache(Generic[KT, VT]):
         if self._expiry_ms:
             def f() -> "defer.Deferred[None]":
                 return hs.run_as_background_process("prune_cache", self._prune_cache)
-            self._clock.looping_call(f, self._expiry_ms / 2)
+            interval = Duration(milliseconds=self._expiry_ms / 2)
+            self._clock.looping_call(f, interval)
 
     def __setitem__(self, key: KT, value: VT) -> None:
         log_debug("__setitem__(%s, %s) - storing in rust cache", key, value)
