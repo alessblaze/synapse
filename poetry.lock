@@ -1742,14 +1742,14 @@ test = ["lxml", "pytest (>=4.6)", "pytest-cov"]
 
 [[package]]
 name = "nanobind"
-version = "2.9.2"
+version = "2.10.2"
 description = "nanobind: tiny and efficient C++/Python bindings"
 optional = false
 python-versions = "*"
 groups = ["main"]
 files = [
-    {file = "nanobind-2.9.2-py3-none-any.whl", hash = "sha256:c37957ffd5eac7eda349cff3622ecd32e5ee1244ecc912c99b5bc8188bafd16e"},
-    {file = "nanobind-2.9.2.tar.gz", hash = "sha256:e7608472de99d375759814cab3e2c94aba3f9ec80e62cfef8ced495ca5c27d6e"},
+    {file = "nanobind-2.10.2-py3-none-any.whl", hash = "sha256:6976c1b04b90481d2612b346485a3063818c6faa5077fe9d8bbc9b5fbe29c380"},
+    {file = "nanobind-2.10.2.tar.gz", hash = "sha256:08509910ce6d1fadeed69cb0880d4d4fcb77739c6af9bd8fb4419391a3ca4c6b"},
 ]
 
 [[package]]
@@ -3759,6 +3759,7 @@ test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner"]
 all = ["authlib", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2-ams", "sentry-sdk", "txredisapi"]
 cache-memory = ["pympler"]
 jwt = ["authlib"]
+matrices-evolved = ["matrices-evolved"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 oidc = ["authlib"]
 opentracing = ["jaeger-client", "opentracing"]
@@ -3773,4 +3774,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "dde1eefcf6c4bfd39416a77b4c0c91a637487e5da95328c9b33a02ce21dbdf95"
+content-hash = "0c65ea81d1d82c74337e42a8d7d7d5f5e8134b12178c2504929fc6a3dd3ce342"

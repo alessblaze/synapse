@@ -23,8 +23,31 @@ from typing import Any
 
 from immutabledict import immutabledict
 
+try:
+    # There is no reason currently to use immutabledict and frozen types if we are offloading most of
+    # heavy logic to Rust/C++ code. it would make code more complex for no benefit.
+    # we can manage the types needed but currently there is no need for that.
+    # no actual performance or security benefit, if we are not using pure python logic.
+    # the references stay in memory for indefinite future and caching layer works fine.
+    # in future this can cause issues in case muatblity in python itself. as multiple workers in same process.
+    # but for that this also needed to be made sure that free threading comes with lots of responsiblities.
+    # so far we have been holding huge amount of mutexes for caches in Rust caches.
+    # if it is considered for lifecycle management itself so its safe.
+    # MATRICES_EVOLVED_AVAILABLE is always false here.
+    # ModuleApiTestCase::test_get_global_no_mutability
+    # ThirdPartyRulesTestCase::test_cannot_modify_event 
+    # These tests may fail. maybe will be fixed in future if needed.
+    from synapse.util.canonicaljson_compat import MATRICES_EVOLVED_AVAILABLE
+except Exception:
+    MATRICES_EVOLVED_AVAILABLE = False
+
 
 def freeze(o: Any) -> Any:
+    # When matrices-evolved is NOT available, don't freeze; just return as-is.
+    # When it IS available, keep the existing behaviour.
+    if not MATRICES_EVOLVED_AVAILABLE:
+        return o
+
     if isinstance(o, dict):
         return immutabledict({k: freeze(v) for k, v in o.items()})
 
@@ -43,6 +66,10 @@ def freeze(o: Any) -> Any:
 
 
 def unfreeze(o: Any) -> Any:
+    # Symmetric behaviour: if we never froze, just return as-is.
+    if not MATRICES_EVOLVED_AVAILABLE:
+        return o
+
     if isinstance(o, collections.abc.Mapping):
         return {k: unfreeze(v) for k, v in o.items()}
 
