@@ -14,7 +14,6 @@ import sqlglot.expressions
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
 
-
 # The base branch we want to check against. We use the main development branch
 # on the assumption that is what we are developing against.
 DEVELOP_BRANCH = "develop"
@@ -188,6 +187,14 @@ def check_schema_delta(delta_files: list[str], force_colors: bool) -> bool:
         sql_lang = "postgres"
         if delta_file.endswith(".sqlite"):
             sql_lang = "sqlite"
+        elif delta_file.endswith(".py"):
+            click.secho(
+                f"Skipping Python delta file: '{delta_file}'",
+                fg="yellow",
+                bold=True,
+                color=force_colors,
+            )
+            return True
 
         statements = sqlglot.parse(delta_contents, read=sql_lang)
 
