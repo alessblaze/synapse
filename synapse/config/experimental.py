@@ -366,7 +366,11 @@ class MSC3866Config:
 
 
 class ExperimentalConfig(Config):
-    """Config section for enabling experimental features"""
+    """Config section for enabling experimental features
+
+    All new experimental features should have a tracking issue with the
+    `T-ExperimentalFeatures` label, kept open as long as the experimental
+    feature is present in Synapse."""
 
     section = "experimental"
 
@@ -380,9 +384,6 @@ class ExperimentalConfig(Config):
 
         # MSC3814 (dehydrated devices with SSSS)
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
-
-        # MSC3244 (room version capabilities)
-        self.msc3244_enabled: bool = experimental.get("msc3244_enabled", True)
 
         # MSC3266 (room summary api)
         self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
