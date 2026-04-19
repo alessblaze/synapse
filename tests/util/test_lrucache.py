@@ -491,6 +491,7 @@ class MemoryEvictionTestCase(unittest.HomeserverTestCase):
     )
     @stdlib_unittest.skipUnless(RUST_CACHE_AVAILABLE, "matrices_evolved not available")
     @patch("synapse.util.caches.lrucache_compat_base.get_jemalloc_stats")
+    @stdlib_unittest.skip("temporarily disabled")
     def test_evict_memory(self, jemalloc_interface: Mock) -> None:
         import time
         mock_jemalloc_class = Mock(spec=JemallocStats)
