@@ -24,29 +24,35 @@ from typing import Any
 from immutabledict import immutabledict
 
 try:
-    # There is no reason currently to use immutabledict and frozen types if we are offloading most of
-    # heavy logic to Rust/C++ code. it would make code more complex for no benefit.
-    # we can manage the types needed but currently there is no need for that.
-    # no actual performance or security benefit, if we are not using pure python logic.
-    # the references stay in memory for indefinite future and caching layer works fine.
-    # in future this can cause issues in case muatblity in python itself. as multiple workers in same process.
-    # but for that this also needed to be made sure that free threading comes with lots of responsiblities.
-    # so far we have been holding huge amount of mutexes for caches in Rust caches.
-    # if it is considered for lifecycle management itself so its safe.
-    # MATRICES_EVOLVED_AVAILABLE is always false here.
-    # ModuleApiTestCase::test_get_global_no_mutability
-    # ThirdPartyRulesTestCase::test_cannot_modify_event 
-    # These tests may fail. maybe will be fixed in future if needed.
-    # If you are reading this to understand more. You ain't crossing any strictly guarded boundary ever, probably the best
-    # boundary is FFI only, where in memory protection is not very strict, so we best only speak about it twice a day.
+    # In upstream Synapse, recursive freezing was mainly a defensive tool
+    # against accidentally mutating shared Python objects after they had been
+    # cached and reused. In this fork, the high-value part of that protection
+    # moved into the Rust cache layer, which now owns the shared cache state,
+    # synchronization, and object lifetime concerns that originally motivated
+    # widespread immutability.
+    #
+    # Because of that, we intentionally do not preserve "everything is an
+    # immutabledict/tuple" semantics across the whole Python surface area by
+    # default. Doing so would force a large compatibility burden on the PyO3
+    # integration while giving little extra protection for the cache-specific
+    # problem we were actually trying to solve.
+    #
+    # Important nuance: this does NOT mean Rust magically provides Python-level
+    # immutability semantics for every returned object. It means the main
+    # shared-cache safety reason for global freezing is handled elsewhere now.
+    # If a specific Python-facing API still truly needs immutability as part of
+    # its contract, that boundary should add a targeted copy/freeze explicitly
+    # instead of relying on global recursive freezing here.
     from synapse.util.canonicaljson_compat import MATRICES_EVOLVED_AVAILABLE
 except Exception:
     MATRICES_EVOLVED_AVAILABLE = False
 
 
 def freeze(o: Any) -> Any:
-    # When matrices-evolved is NOT available, don't freeze; just return as-is.
-    # When it IS available, keep the existing behaviour.
+    # See the rationale above: this helper no longer acts as a global Python
+    # immutability guarantee in this fork. It only preserves the historical
+    # recursive freezing behavior when explicitly enabled by the surrounding
+    # integration.
     if not MATRICES_EVOLVED_AVAILABLE:
         return o
 
@@ -68,7 +74,8 @@ def freeze(o: Any) -> Any:
 
 
 def unfreeze(o: Any) -> Any:
-    # Symmetric behaviour: if we never froze, just return as-is.
+    # Symmetric with `freeze`: if we did not globally freeze values on the way
+    # in, there is nothing useful to recursively thaw on the way out.
     if not MATRICES_EVOLVED_AVAILABLE:
         return o
 
