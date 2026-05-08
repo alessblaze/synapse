@@ -10,21 +10,9 @@
 """
 Centralized wrapper for JSON functionality with matrices_evolved optimization.
 
-The goal here is to keep `matrices_evolved` on the normal fast path without
-changing Synapse's historical JSON semantics at integration boundaries.
-
-In particular, some older Synapse call sites rely on the stdlib-style
-`json.JSONEncoder.encode(...)` contract for values that are not performance
-critical, such as optional metadata fields. A concrete example is passing
-`None` to mean "no tracing context"; the legacy encoder turns that into `null`,
-while the optimized binding may reject it before its internal serializer runs.
-That tracing context is observability metadata attached to a send/update path,
-not required business data for the operation itself.
-
-Because of that, encoding uses `matrices_evolved` first and falls back to
-Synapse's previous encoder only when the optimized implementation refuses a
-value. This preserves compatibility for edge cases while keeping the optimized
-implementation for ordinary JSON payloads.
+The preferred implementation is `matrices_evolved`, which now supports the
+Synapse-specific mapping wrappers and `None` values that previously required a
+compatibility fallback during the migration.
 """
 
 from synapse.util.json import (
@@ -32,24 +20,16 @@ from synapse.util.json import (
     json_encoder as _fallback_json_encoder,
 )
 
-# Use matrices_evolved when available, but preserve the previous Synapse
-# encoder/decoder behavior when the optimized binding cannot represent a value.
+# Use matrices_evolved when available and keep the old implementation only as
+# an import-time fallback for environments where the extension is unavailable.
 try:
     from matrices_evolved import json_encode as _matrices_json_encode, json_decode as _matrices_json_decode
 
     class _OptimizedJSONEncoder:
-        """Wrapper to provide `.encode()` interface with Synapse compatibility."""
+        """Wrapper to provide `.encode()` interface for matrices_evolved."""
 
         def encode(self, obj):
-            try:
-                return _matrices_json_encode(obj)
-            except (TypeError, ValueError):
-                # Some Synapse call sites intentionally pass edge-case values
-                # such as `None` for optional metadata. Those values are not on
-                # the hot path, but callers still expect the old `.encode()`
-                # semantics instead of a hard failure from the optimized
-                # binding, so we delegate back to the legacy encoder here.
-                return _fallback_json_encoder.encode(obj)
+            return _matrices_json_encode(obj)
 
         def __call__(self, obj):
             return self.encode(obj)

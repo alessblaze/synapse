@@ -583,21 +583,21 @@ smmap = ">=3.0.1,<6"
 
 [[package]]
 name = "gitpython"
-version = "3.1.46"
+version = "3.1.47"
 description = "GitPython is a Python library used to interact with Git repositories"
 optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
-    {file = "gitpython-3.1.46-py3-none-any.whl", hash = "sha256:79812ed143d9d25b6d176a10bb511de0f9c67b1fa641d82097b0ab90398a2058"},
-    {file = "gitpython-3.1.46.tar.gz", hash = "sha256:400124c7d0ef4ea03f7310ac2fbf7151e09ff97f2a3288d64a440c584a29c37f"},
+    {file = "gitpython-3.1.47-py3-none-any.whl", hash = "sha256:489f590edfd6d20571b2c0e72c6a6ac6915ee8b8cd04572330e3842207a78905"},
+    {file = "gitpython-3.1.47.tar.gz", hash = "sha256:dba27f922bd2b42cb54c87a8ab3cb6beb6bf07f3d564e21ac848913a05a8a3cd"},
 ]
 
 [package.dependencies]
 gitdb = ">=4.0.1,<5"
 
 [package.extras]
-doc = ["sphinx (>=7.1.2,<7.2)", "sphinx-autodoc-typehints", "sphinx_rtd_theme"]
+doc = ["sphinx (>=7.4.7,<8)", "sphinx-autodoc-typehints", "sphinx_rtd_theme"]
 test = ["coverage[toml]", "ddt (>=1.1.1,!=1.4.3)", "mock ; python_version < \"3.8\"", "mypy (==1.18.2) ; python_version >= \"3.9\"", "pre-commit", "pytest (>=7.3.1)", "pytest-cov", "pytest-instafail", "pytest-mock", "pytest-sugar", "typing-extensions ; python_version < \"3.11\""]
 
 [[package]]
@@ -1619,15 +1619,15 @@ files = [
 
 [[package]]
 name = "matrices-evolved"
-version = "1.0.11"
+version = "1.0.12"
 description = "High-performance Matrix event signing library"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "matrices_evolved-1.0.11-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:4da74a1ce340c40a747099d3ba46cac26597ad9a958d5c08208b8ea4da0fc74d"},
-    {file = "matrices_evolved-1.0.11-cp313-cp313-manylinux_2_34_aarch64.whl", hash = "sha256:78d184bb28e7c6a0b87e26c95488820c4e0df028245151038593b9910d24c9de"},
-    {file = "matrices_evolved-1.0.11-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:1aab7eb7e882bf463535822631eb6ecc33e373489d59587e231c6475f4e1cc1a"},
+    {file = "matrices_evolved-1.0.12-cp310-cp310-manylinux_2_34_x86_64.whl", hash = "sha256:50134c5582915d1e7d18c3b5cef5643d6c352159a4ff4fea68e81d98f70e58ee"},
+    {file = "matrices_evolved-1.0.12-cp313-cp313-manylinux_2_34_aarch64.whl", hash = "sha256:4305e5a1af9c0084ce4ee147f3fae465f1a98739bd7171011f22a26e9520ab0b"},
+    {file = "matrices_evolved-1.0.12-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:8fe20f5f2b73648e4f3a98ef6d1c17a9fbf13af43048c09204c2bf96f0f05187"},
 ]
 
 [package.dependencies]
@@ -2820,14 +2820,14 @@ six = ">=1.5"
 
 [[package]]
 name = "python-multipart"
-version = "0.0.26"
+version = "0.0.27"
 description = "A streaming multipart parser for Python"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "python_multipart-0.0.26-py3-none-any.whl", hash = "sha256:c0b169f8c4484c13b0dcf2ef0ec3a4adb255c4b7d18d8e420477d2b1dd03f185"},
-    {file = "python_multipart-0.0.26.tar.gz", hash = "sha256:08fadc45918cd615e26846437f50c5d6d23304da32c341f289a617127b081f17"},
+    {file = "python_multipart-0.0.27-py3-none-any.whl", hash = "sha256:6fccfad17a27334bd0193681b369f476eda3409f17381a2d65aa7df3f7275645"},
+    {file = "python_multipart-0.0.27.tar.gz", hash = "sha256:9870a6a8c5a20a5bf4f07c017bd1489006ff8836cff097b6933355ee2b49b602"},
 ]
 
 [[package]]
@@ -4060,4 +4060,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "a9ce22685d6981cd1d5702d6aca1079f845af4bfb49e4cb3db41134bd0541096"
+content-hash = "d17798558da5ff09e7378f6001c94784b8b2f928d2de92de91a61d48f4ff90fe"

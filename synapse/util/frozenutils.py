@@ -22,6 +22,7 @@ import collections.abc
 from typing import Any
 
 from immutabledict import immutabledict
+from synapse.synapse_rust.events import JsonObject
 
 try:
     # In upstream Synapse, recursive freezing was mainly a defensive tool
@@ -60,6 +61,9 @@ def freeze(o: Any) -> Any:
         return immutabledict({k: freeze(v) for k, v in o.items()})
 
     if isinstance(o, immutabledict):
+        return o
+
+    if isinstance(o, JsonObject):
         return o
 
     if isinstance(o, (bytes, str)):
